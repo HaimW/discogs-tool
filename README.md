@@ -2,6 +2,12 @@
 
 A web app that syncs your Discogs vinyl collection and lets you listen to it via YouTube. Browse your crates, filter by genre or folder, and hit shuffle — all from a dark, vinyl-themed interface.
 
+**No install required.** Runs entirely in your browser.
+
+## Try It
+
+Open **[haimw.github.io/discogs-tool](https://haimw.github.io/discogs-tool/)** and enter your Discogs username + token. That's it.
+
 ## Features
 
 - **Discogs sync** — imports your full collection with cover art, genres, styles, and formats
@@ -11,63 +17,51 @@ A web app that syncs your Discogs vinyl collection and lets you listen to it via
 - **Genre filtering** — filter by genre with one click
 - **Search** — find releases by artist or title
 - **Shuffle play** — random playlist from your whole collection or filtered subset
-- **Setup wizard** — no manual config needed, enter your Discogs token on first boot
+- **Zero install** — pure client-side, runs in any modern browser
+- **Private** — your token and collection stay in your browser (IndexedDB), never sent to any server
 
-## Quick Start (Docker)
+## How It Works
 
-```bash
-git clone https://github.com/HaimW/discogs-tool.git
-cd discogs-tool
-docker compose up
-```
+1. Open the app in your browser
+2. Enter your Discogs username and [personal access token](https://www.discogs.com/settings/developers)
+3. Click **Sync Collection** to pull your releases
+4. Browse, search, filter, and play
 
-Open [http://localhost:5000](http://localhost:5000) and follow the setup wizard.
-
-Your database and credentials are stored in `./data/` and persist across restarts.
-
-## Quick Start (Manual)
-
-```bash
-git clone https://github.com/HaimW/discogs-tool.git
-cd discogs-tool
-pip install -r requirements.txt
-python app.py
-```
-
-Open [http://localhost:5000](http://localhost:5000) and follow the setup wizard.
+Your collection is stored locally in your browser's IndexedDB. The app only talks to the Discogs API and YouTube — there is no backend server.
 
 ## Getting a Discogs Token
 
 1. Go to [Discogs Developer Settings](https://www.discogs.com/settings/developers)
 2. Click **Generate new token**
-3. Copy the token — you'll paste it into the setup wizard
-
-## How It Works
-
-1. **Sync** — click "Sync Collection" to pull your releases from Discogs
-2. **Browse** — scroll the grid, search, filter by genre or folder, sort by artist/title/year
-3. **Play** — click a release to see its tracklist, click play on any track
-4. **Shuffle** — hit "Shuffle Play" on the collection page for a random mix
-
-The first sync fetches video links for each release from the Discogs API. This takes a few minutes for large collections (~1 release/sec due to API rate limits). Subsequent syncs only fetch new additions.
+3. Copy the token and paste it into the app
 
 ## Tech Stack
 
-- **Backend:** Flask, SQLite, requests
-- **Frontend:** Vanilla JS, YouTube IFrame API
-- **No build step.** No npm. No bundler. Just Python and a browser.
+- **Zero dependencies.** No React, no npm, no build step.
+- Vanilla JavaScript, IndexedDB, YouTube IFrame API
+- Hosted on GitHub Pages (free)
+
+## Running Locally
+
+Just open `docs/index.html` in a browser, or serve it:
+
+```bash
+cd docs
+python3 -m http.server 5000
+```
 
 ## Project Structure
 
 ```
-app.py              Flask routes + entry point
-db.py               SQLite schema + query helpers
-discogs_sync.py     Three-phase Discogs API sync (folders, collection, videos)
-config.py           Env var loader + setup wizard config
-static/player.js    YouTube player, queue, state persistence
-static/style.css    Dark vinyl theme
-templates/          Jinja2 templates (base, index, release, setup)
+docs/
+  index.html    Single page app shell
+  style.css     Dark vinyl theme
+  app.js        All logic: Discogs API, IndexedDB, SPA router, YouTube player
 ```
+
+## v1 (Flask Backend)
+
+The original Flask + SQLite version is on the `main` branch. See its README for Docker and manual setup instructions.
 
 ## License
 
