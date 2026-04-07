@@ -16,6 +16,32 @@ _sync_lock = threading.Lock()
 _sync_status = {'running': False, 'message': ''}
 
 
+@app.before_request
+def require_setup():
+    if config.is_configured():
+        return
+    allowed = ('setup', 'static')
+    if request.endpoint in allowed:
+        return
+    return redirect(url_for('setup'))
+
+
+@app.route('/setup', methods=['GET', 'POST'])
+def setup():
+    if request.method == 'POST':
+        token = request.form.get('token', '').strip()
+        username = request.form.get('username', '').strip()
+        if not token or not username:
+            flash('Both fields are required.', 'error')
+            return render_template('setup.html', token=token, username=username)
+        config.save_config(token, username)
+        flash('Configuration saved! You can now sync your collection.', 'info')
+        return redirect(url_for('index'))
+    return render_template('setup.html',
+                           token=config.DISCOGS_TOKEN,
+                           username=config.DISCOGS_USERNAME)
+
+
 @app.route('/')
 def index():
     q = request.args.get('q', '').strip()

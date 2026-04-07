@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Setup - Vinyl Collection Player{% endblock %}
+
+{% block content %}
+<div class="setup-page">
+    <div class="setup-card">
+        <div class="vinyl-icon-huge">&#9898;</div>
+        <h1 class="setup-title">Welcome to Vinyl Collection Player</h1>
+        <p class="setup-subtitle">Connect your Discogs account to get started</p>
+
+        <form method="post" class="setup-form">
+            <div class="form-group">
+                <label for="username" class="form-label">Discogs Username</label>
+                <input type="text" id="username" name="username" value="{{ username or '' }}"
+                       class="form-input" placeholder="e.g. yafim.sh" required autocomplete="off">
+            </div>
+
+            <div class="form-group">
+                <label for="token" class="form-label">Personal Access Token</label>
+                <input type="text" id="token" name="token" value="{{ token or '' }}"
+                       class="form-input" placeholder="Paste your token here" required autocomplete="off">
+                <p class="form-hint">
+                    Generate a token at
+                    <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">
+                        Discogs Developer Settings</a>
+                    &nearr;
+                </p>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-large btn-full">
+                Save &amp; Continue
+            </button>
+        </form>
+    </div>
+</div>
+
+<style>
+    /* Hide nav sync button on setup page */
+    .sync-form { display: none !important; }
+
+    .setup-page {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: calc(100vh - 160px);
+    }
+
+    .setup-card {
+        text-align: center;
+        max-width: 440px;
+        width: 100%;
+        padding: 48px 32px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+    }
+
+    .setup-title {
+        font-family: var(--font-mono);
+        font-size: 22px;
+        margin-bottom: 6px;
+    }
+
+    .setup-subtitle {
+        color: var(--text-muted);
+        font-size: 14px;
+        margin-bottom: 32px;
+    }
+
+    .setup-form {
+        text-align: left;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+    .form-label {
+        display: block;
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 6px;
+    }
+
+    .form-input {
+        width: 100%;
+        padding: 10px 14px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-family: var(--font-body);
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+    }
+
+    .form-input:focus {
+        border-color: var(--accent);
+    }
+
+    .form-input::placeholder {
+        color: var(--text-dim);
+    }
+
+    .form-hint {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--text-dim);
+    }
+
+    .btn-full {
+        width: 100%;
+        justify-content: center;
+        margin-top: 8px;
+    }
+</style>
+{% endblock %}
