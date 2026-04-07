@@ -1,0 +1,9 @@
+.env
+*.db
+__pycache__/
+.venv/
+data/
+.git/
+.gitignore
+.dockerignore
+README.md

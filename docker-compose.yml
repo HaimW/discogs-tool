@@ -1,0 +1,10 @@
+services:
+  vinyl-player:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_PATH=/app/data/collection.db
+    restart: unless-stopped
