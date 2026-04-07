@@ -246,6 +246,59 @@ a:hover {
     color: var(--text-dim);
 }
 
+/* ============ FOLDER PILLS ============ */
+
+.folder-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.filter-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-right: 4px;
+    font-weight: 500;
+}
+
+.folder-pill {
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.folder-pill:hover, .folder-pill.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-glow);
+}
+
+/* ============ SHUFFLE BUTTON ============ */
+
+.btn-shuffle {
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    font-family: var(--font-body);
+    transition: all 0.2s;
+    margin-left: 12px;
+}
+
+.btn-shuffle:hover {
+    background: var(--accent);
+    color: #000;
+}
+
 /* ============ GENRE PILLS ============ */
 
 .genre-pills {
@@ -716,14 +769,15 @@ a:hover {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 80px;
+    height: auto;
+    min-height: 80px;
     background: rgba(10, 10, 10, 0.95);
     backdrop-filter: blur(20px);
     border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 12px 20px;
     z-index: 200;
     gap: 16px;
 }
@@ -737,8 +791,8 @@ a:hover {
 }
 
 .np-cover {
-    width: 56px;
-    height: 56px;
+    width: 80px;
+    height: 80px;
     border-radius: 4px;
     object-fit: cover;
     flex-shrink: 0;

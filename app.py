@@ -3,7 +3,8 @@ import threading
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
 import config
-from db import init_db, get_releases, get_release, get_all_genres, search_releases_json
+from db import (init_db, get_releases, get_release, get_all_genres,
+                get_all_folders, get_random_videos, search_releases_json)
 from discogs_sync import sync_collection
 
 app = Flask(__name__)
@@ -46,21 +47,25 @@ def setup():
 def index():
     q = request.args.get('q', '').strip()
     genre = request.args.get('genre', '').strip()
+    folder = request.args.get('folder', '').strip()
     sort = request.args.get('sort', 'artist')
     page = request.args.get('page', 1, type=int)
 
     releases, total_count, total_pages = get_releases(
-        q=q or None, genre=genre or None, sort=sort, page=page
+        q=q or None, genre=genre or None, folder=folder or None,
+        sort=sort, page=page
     )
     genres = get_all_genres()
+    folders = get_all_folders()
 
     return render_template('index.html',
         releases=releases,
         total_count=total_count,
         total_pages=total_pages,
         current_page=page,
-        q=q, genre=genre, sort=sort,
+        q=q, genre=genre, folder=folder, sort=sort,
         genres=genres,
+        folders=folders,
         sync_running=_sync_status['running'],
     )
 
@@ -114,6 +119,16 @@ def api_search():
     if not q:
         return jsonify([])
     return jsonify(search_releases_json(q))
+
+
+@app.route('/api/random-playlist')
+def api_random_playlist():
+    q = request.args.get('q', '').strip() or None
+    genre = request.args.get('genre', '').strip() or None
+    folder = request.args.get('folder', '').strip() or None
+    limit = request.args.get('limit', 50, type=int)
+    videos = get_random_videos(q=q, genre=genre, folder=folder, limit=limit)
+    return jsonify(videos)
 
 
 if __name__ == '__main__':
