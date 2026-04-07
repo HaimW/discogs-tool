@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Collection - Vinyl Collection Player{% endblock %}
+
+{% block content %}
+<div class="collection-header">
+    <div class="collection-stats">
+        <h1>Your Collection</h1>
+        <span class="stat-count">{{ total_count }} releases</span>
+    </div>
+
+    <form class="search-bar" action="{{ url_for('index') }}" method="get">
+        <input type="text" name="q" value="{{ q }}" placeholder="Search artist or title..."
+               class="search-input" autocomplete="off">
+        {% if genre %}
+        <input type="hidden" name="genre" value="{{ genre }}">
+        {% endif %}
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <button type="submit" class="btn btn-search">Search</button>
+        {% if q %}
+        <a href="{{ url_for('index', genre=genre, sort=sort) }}" class="btn btn-clear">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<!-- Genre Filter Pills -->
+{% if genres %}
+<div class="genre-pills">
+    <a href="{{ url_for('index', q=q, sort=sort) }}"
+       class="genre-pill {% if not genre %}active{% endif %}">All</a>
+    {% for g in genres %}
+    <a href="{{ url_for('index', q=q, genre=g, sort=sort) }}"
+       class="genre-pill {% if genre == g %}active{% endif %}">{{ g }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Sort Options -->
+<div class="sort-bar">
+    <span class="sort-label">Sort by:</span>
+    <a href="{{ url_for('index', q=q, genre=genre, sort='artist') }}"
+       class="sort-option {% if sort == 'artist' %}active{% endif %}">Artist</a>
+    <a href="{{ url_for('index', q=q, genre=genre, sort='title') }}"
+       class="sort-option {% if sort == 'title' %}active{% endif %}">Title</a>
+    <a href="{{ url_for('index', q=q, genre=genre, sort='year') }}"
+       class="sort-option {% if sort == 'year' %}active{% endif %}">Year</a>
+    <a href="{{ url_for('index', q=q, genre=genre, sort='date_added') }}"
+       class="sort-option {% if sort == 'date_added' %}active{% endif %}">Date Added</a>
+</div>
+
+{% if releases %}
+<div class="release-grid">
+    {% for r in releases %}
+    <a href="{{ url_for('release_detail', release_id=r.id) }}" class="release-card">
+        <div class="card-cover">
+            {% if r.cover_url %}
+            <img src="{{ r.cover_url }}" alt="{{ r.artist }} - {{ r.title }}" loading="lazy">
+            {% else %}
+            <div class="no-cover">
+                <span class="vinyl-icon-large">&#9898;</span>
+            </div>
+            {% endif %}
+            {% if r.video_count == 0 %}
+            <span class="badge badge-no-videos" title="No videos available">No Videos</span>
+            {% else %}
+            <span class="badge badge-videos">{{ r.video_count }} video{{ 's' if r.video_count != 1 }}</span>
+            {% endif %}
+            {% if r.quantity > 1 %}
+            <span class="badge badge-quantity">x{{ r.quantity }}</span>
+            {% endif %}
+        </div>
+        <div class="card-info">
+            <div class="card-artist">{{ r.artist }}</div>
+            <div class="card-title">{{ r.title }}</div>
+            <div class="card-meta">
+                {% if r.year %}<span>{{ r.year }}</span>{% endif %}
+                {% if r.format %}<span class="card-format">{{ r.format }}</span>{% endif %}
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if current_page > 1 %}
+    <a href="{{ url_for('index', q=q, genre=genre, sort=sort, page=current_page-1) }}"
+       class="page-link">&laquo; Prev</a>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == current_page %}
+        <span class="page-link active">{{ p }}</span>
+        {% elif p <= 3 or p > total_pages - 3 or (p >= current_page - 2 and p <= current_page + 2) %}
+        <a href="{{ url_for('index', q=q, genre=genre, sort=sort, page=p) }}"
+           class="page-link">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}
+        <span class="page-dots">...</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if current_page < total_pages %}
+    <a href="{{ url_for('index', q=q, genre=genre, sort=sort, page=current_page+1) }}"
+       class="page-link">Next &raquo;</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    {% if q or genre %}
+    <p class="empty-title">No releases found</p>
+    <p class="empty-subtitle">Try a different search or filter</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">Show All</a>
+    {% else %}
+    <div class="vinyl-icon-huge">&#9898;</div>
+    <p class="empty-title">Your collection is empty</p>
+    <p class="empty-subtitle">Sync your Discogs collection to get started</p>
+    <form action="{{ url_for('sync') }}" method="post">
+        <button type="submit" class="btn btn-primary btn-large">
+            <span class="sync-icon">&#8635;</span>
+            Sync Collection
+        </button>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ release.artist }} - {{ release.title }} | Vinyl Collection Player{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('index') }}" class="back-link">&larr; Back to Collection</a>
+
+<div class="release-detail">
+    <div class="release-hero">
+        <div class="release-cover-wrap">
+            {% if release.cover_url %}
+            <img src="{{ release.cover_url }}" alt="{{ release.artist }} - {{ release.title }}"
+                 class="release-cover">
+            {% else %}
+            <div class="release-cover no-cover-large">
+                <span class="vinyl-icon-huge">&#9898;</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="release-meta">
+            <h1 class="release-title">{{ release.title }}</h1>
+            <h2 class="release-artist">{{ release.artist }}</h2>
+
+            <div class="meta-tags">
+                {% if release.year %}
+                <span class="meta-tag">{{ release.year }}</span>
+                {% endif %}
+                {% if release.format %}
+                <span class="meta-tag">{{ release.format }}</span>
+                {% endif %}
+                {% if release.quantity > 1 %}
+                <span class="meta-tag meta-tag-qty">x{{ release.quantity }} copies</span>
+                {% endif %}
+            </div>
+
+            {% if release.genres %}
+            <div class="meta-genres">
+                {% for g in release.genres.split(', ') %}
+                <a href="{{ url_for('index', genre=g) }}" class="genre-pill small">{{ g }}</a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if release.styles %}
+            <div class="meta-styles">
+                {% for s in release.styles.split(', ') %}
+                <span class="style-tag">{{ s }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <a href="https://www.discogs.com/release/{{ release.id }}" target="_blank"
+               rel="noopener" class="discogs-link">
+                View on Discogs &nearr;
+            </a>
+        </div>
+    </div>
+
+    <!-- Video / Track List -->
+    <div class="video-section">
+        {% if videos %}
+        <div class="video-header">
+            <h3>Tracks ({{ videos|length }})</h3>
+            <button class="btn btn-play-all"
+                    onclick="playAll()"
+                    data-release-cover="{{ release.cover_url or '' }}"
+                    data-release-artist="{{ release.artist }}">
+                &#9654; Play All
+            </button>
+        </div>
+
+        <div class="video-list" id="video-list">
+            {% for v in videos %}
+            <div class="video-item" data-youtube-id="{{ v.youtube_id }}"
+                 data-title="{{ v.title }}" data-uri="{{ v.uri }}"
+                 data-cover="{{ release.cover_url or '' }}"
+                 data-artist="{{ release.artist }}">
+                <button class="play-btn" onclick="playTrack(this.parentElement)"
+                        title="Play {{ v.title }}">
+                    <span class="play-icon">&#9654;</span>
+                </button>
+                <div class="video-info">
+                    <div class="video-title">{{ v.title }}</div>
+                    {% if v.duration %}
+                    <div class="video-duration">{{ '%d:%02d' % (v.duration // 60, v.duration % 60) }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% else %}
+        <div class="no-videos-message">
+            <p>No YouTube videos linked to this release on Discogs.</p>
+            <p class="hint">Check the <a href="https://www.discogs.com/release/{{ release.id }}"
+               target="_blank" rel="noopener">Discogs page</a> or search YouTube manually.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

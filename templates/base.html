@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vinyl Collection Player{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="{{ url_for('index') }}" class="nav-brand">
+            <span class="vinyl-icon">&#9898;</span>
+            Vinyl Collection Player
+        </a>
+        <div class="nav-actions">
+            <form action="{{ url_for('sync') }}" method="post" class="sync-form">
+                <button type="submit" class="btn btn-sync" id="sync-btn">
+                    <span class="sync-icon">&#8635;</span>
+                    Sync Collection
+                </button>
+            </form>
+        </div>
+    </nav>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <div id="sync-banner" class="sync-banner" style="display:none;">
+        <span class="sync-spinner">&#9676;</span>
+        <span id="sync-message">Syncing...</span>
+    </div>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Now Playing Bar -->
+    <div id="now-playing" class="now-playing" style="display:none;">
+        <div class="np-info">
+            <img id="np-cover" class="np-cover" src="" alt="">
+            <div class="np-text">
+                <div id="np-title" class="np-title">No track selected</div>
+                <div id="np-artist" class="np-artist"></div>
+            </div>
+        </div>
+        <div class="np-player">
+            <div id="player-container"></div>
+        </div>
+        <div class="np-controls">
+            <button id="np-prev" class="np-btn" title="Previous">&#9664;&#9664;</button>
+            <button id="np-play-pause" class="np-btn np-btn-main" title="Play/Pause">&#9654;</button>
+            <button id="np-next" class="np-btn" title="Next">&#9654;&#9654;</button>
+            <button id="np-close" class="np-btn np-btn-close" title="Close">&times;</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='player.js') }}"></script>
+</body>
+</html>
