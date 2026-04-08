@@ -242,13 +242,14 @@ async function syncCollection(config) {
             var data = await discogsGet('/releases/' + rel.id, config);
             var videos = (data.videos || []);
             var vidCount = 0;
+            var skipped = { noEmbed: 0, notYoutube: 0, noId: 0 };
             for (var v = 0; v < videos.length; v++) {
                 var vid = videos[v];
-                if (!vid.embed) continue;
+                if (!vid.embed) { skipped.noEmbed++; continue; }
                 var uri = vid.uri || '';
-                if (uri.indexOf('youtube.com') === -1 && uri.indexOf('youtu.be') === -1) continue;
+                if (uri.indexOf('youtube.com') === -1 && uri.indexOf('youtu.be') === -1) { skipped.notYoutube++; continue; }
                 var ytId = extractYoutubeId(uri);
-                if (!ytId) continue;
+                if (!ytId) { skipped.noId++; continue; }
                 await dbPut('videos', {
                     id: rel.id + '_' + ytId,
                     release_id: rel.id,
@@ -256,15 +257,22 @@ async function syncCollection(config) {
                     uri: uri,
                     youtube_id: ytId,
                     duration: vid.duration || null,
-                    position: v + 1
+                    position: vidCount + 1
                 });
                 vidCount++;
             }
+            console.log('[sync] ' + rel.artist + ' - ' + rel.title +
+                ': ' + videos.length + ' total, ' + vidCount + ' saved' +
+                ' (skipped: embed=' + skipped.noEmbed + ' notYT=' + skipped.notYoutube + ' noId=' + skipped.noId + ')');
             rel.video_count = vidCount;
             rel.synced_at = new Date().toISOString();
             await dbPut('releases', rel);
         } catch (err) {
-            console.error('Error fetching release ' + rel.id + ':', err);
+            console.error('[sync] FAILED release ' + rel.id + ' (' + rel.artist + ' - ' + rel.title + '):', err.message);
+            // Mark as synced with 0 so we don't retry forever on bad releases
+            rel.video_count = 0;
+            rel.synced_at = new Date().toISOString();
+            await dbPut('releases', rel);
         }
     }
 }
