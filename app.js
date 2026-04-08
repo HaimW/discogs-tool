@@ -128,27 +128,31 @@ async function discogsGet(path, config, _retries) {
     // CORS preflight (OPTIONS) requests that Discogs blocks on some endpoints.
     var separator = path.indexOf('?') === -1 ? '?' : '&';
     var url = 'https://api.discogs.com' + path + separator + 'token=' + config.token;
-    var r = await fetch(url);
 
-    // Rate limited — back off and retry
+    var r;
+    try {
+        r = await fetch(url);
+    } catch (err) {
+        // Network error or CORS block (429 without CORS headers shows up here)
+        if (_retries <= 0) throw err;
+        var backoff = (4 - _retries) * 15;
+        console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
+        showSyncBanner('Rate limited — waiting ' + backoff + 's...');
+        await sleep(backoff * 1000);
+        return discogsGet(path, config, _retries - 1);
+    }
+
+    // Explicit 429 (in case CORS headers are present)
     if (r.status === 429) {
         if (_retries <= 0) throw new Error('Rate limited after retries');
         var wait = parseInt(r.headers.get('Retry-After') || '30') * 1000;
-        console.warn('Rate limited on ' + path + ', waiting ' + (wait / 1000) + 's...');
+        console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
         return discogsGet(path, config, _retries - 1);
     }
 
     if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
-
-    // Proactive back-off when close to limit
-    var remaining = r.headers.get('X-Discogs-Ratelimit-Remaining');
-    if (remaining !== null && parseInt(remaining) < 5) {
-        console.warn('Rate limit low (' + remaining + '), sleeping 10s...');
-        showSyncBanner('Rate limit low, pausing 10s...');
-        await sleep(10000);
-    }
 
     return r.json();
 }
@@ -269,11 +273,12 @@ async function syncCollection(config) {
             await dbPut('releases', rel);
         } catch (err) {
             console.error('[sync] FAILED release ' + rel.id + ' (' + rel.artist + ' - ' + rel.title + '):', err.message);
-            // Mark as synced with 0 so we don't retry forever on bad releases
-            rel.video_count = 0;
-            rel.synced_at = new Date().toISOString();
-            await dbPut('releases', rel);
+            // Don't mark as synced — allow retry on next sync
         }
+        // Mandatory 1.5s delay between requests to stay under 60 req/min.
+        // Discogs 429 responses don't include CORS headers, so the browser
+        // blocks us from even seeing the status code — prevention is key.
+        await sleep(1500);
     }
 }
 
