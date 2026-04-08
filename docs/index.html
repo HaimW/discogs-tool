@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vinyl Collection Player</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <nav class="top-nav">
+        <a href="#" class="nav-brand" onclick="navigate('collection'); return false;">
+            <span class="vinyl-icon">&#9898;</span>
+            Vinyl Collection Player
+        </a>
+        <div class="nav-actions">
+            <button class="btn btn-sync" id="sync-btn" onclick="startSync()">
+                <span class="sync-icon">&#8635;</span>
+                Sync Collection
+            </button>
+        </div>
+    </nav>
+
+    <div id="sync-banner" class="sync-banner" style="display:none;">
+        <span class="sync-spinner">&#9676;</span>
+        <span id="sync-message">Syncing...</span>
+    </div>
+
+    <main class="content" id="app">
+        <!-- SPA content rendered here by app.js -->
+    </main>
+
+    <!-- Now Playing Bar -->
+    <div id="now-playing" class="now-playing" style="display:none;">
+        <div class="np-info">
+            <img id="np-cover" class="np-cover" src="" alt="">
+            <div class="np-text">
+                <div id="np-title" class="np-title">No track selected</div>
+                <div id="np-artist" class="np-artist"></div>
+            </div>
+        </div>
+        <div class="np-player">
+            <div id="player-container"></div>
+        </div>
+        <div class="np-controls">
+            <button id="np-prev" class="np-btn" title="Previous">&#9664;&#9664;</button>
+            <button id="np-play-pause" class="np-btn np-btn-main" title="Play/Pause">&#9654;</button>
+            <button id="np-next" class="np-btn" title="Next">&#9654;&#9654;</button>
+            <button id="np-close" class="np-btn np-btn-close" title="Close">&times;</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
