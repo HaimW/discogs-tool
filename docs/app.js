@@ -212,11 +212,18 @@ async function syncCollection(config) {
         }
     }
 
-    // Save releases to IndexedDB
+    // Save releases to IndexedDB — preserve synced_at and video_count
+    // from existing records so a re-sync doesn't wipe previous video data.
     var ids = Object.keys(allReleases);
     showSyncBanner('Saving ' + ids.length + ' releases...');
     for (var ri = 0; ri < ids.length; ri++) {
-        await dbPut('releases', allReleases[ids[ri]]);
+        var newRel = allReleases[ids[ri]];
+        var existing = await dbGet('releases', newRel.id);
+        if (existing) {
+            newRel.synced_at = existing.synced_at;
+            newRel.video_count = existing.video_count || 0;
+        }
+        await dbPut('releases', newRel);
     }
 
     // Phase 2: Fetch videos — sequential with rate-limit-aware pacing.
@@ -383,9 +390,19 @@ function submitSetup() {
 // ============ Collection View ============
 
 function renderCollection() {
-    Promise.all([dbGetAll('releases'), dbGetAll('folders')]).then(function (results) {
+    Promise.all([dbGetAll('releases'), dbGetAll('folders'), dbGetAll('videos')]).then(function (results) {
         var allReleases = results[0];
         var folders = results[1].filter(function (f) { return f.id !== 0; });
+        var allVideos = results[2];
+
+        // Build accurate video counts from actual video records
+        var videoCounts = {};
+        allVideos.forEach(function (v) {
+            videoCounts[v.release_id] = (videoCounts[v.release_id] || 0) + 1;
+        });
+        allReleases.forEach(function (r) {
+            r.video_count = videoCounts[r.id] || 0;
+        });
 
         // Filter
         var filtered = allReleases;
