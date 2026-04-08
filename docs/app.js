@@ -130,6 +130,11 @@ function discogsGet(path, config) {
     return fetch('https://api.discogs.com' + path, { headers: headers })
         .then(function (r) {
             if (!r.ok) throw new Error('Discogs API error: ' + r.status);
+            // Check rate limit — sleep if running low
+            var remaining = r.headers.get('X-Discogs-Ratelimit-Remaining');
+            if (remaining !== null && parseInt(remaining) < 5) {
+                return sleep(10000).then(function () { return r.json(); });
+            }
             return r.json();
         });
 }
@@ -200,44 +205,54 @@ async function syncCollection(config) {
         await dbPut('releases', allReleases[ids[ri]]);
     }
 
-    // Phase 2: Fetch videos
+    // Phase 2: Fetch videos (batched — 3 concurrent requests, ~180 req/min max but
+    // rate-limit header check in discogsGet() will back off when close to limit)
     var releases = await dbGetAll('releases');
     var unsynced = releases.filter(function (r) { return !r.synced_at; });
     var total = unsynced.length;
+    var completed = 0;
+    var BATCH_SIZE = 3;
 
-    for (var vi = 0; vi < unsynced.length; vi++) {
-        var rel = unsynced[vi];
-        showSyncBanner('Fetching videos: ' + (vi + 1) + '/' + total + ' - ' + rel.artist + ' - ' + rel.title);
+    for (var bi = 0; bi < unsynced.length; bi += BATCH_SIZE) {
+        var batch = unsynced.slice(bi, bi + BATCH_SIZE);
+        var batchStart = Date.now();
 
-        try {
-            var data = await discogsGet('/releases/' + rel.id, config);
-            var videos = (data.videos || []);
-            var vidCount = 0;
-            for (var v = 0; v < videos.length; v++) {
-                var vid = videos[v];
-                if (!vid.embed) continue;
-                var uri = vid.uri || '';
-                if (uri.indexOf('youtube.com') === -1 && uri.indexOf('youtu.be') === -1) continue;
-                var ytId = extractYoutubeId(uri);
-                if (!ytId) continue;
-                await dbPut('videos', {
-                    id: rel.id + '_' + ytId,
-                    release_id: rel.id,
-                    title: vid.title || 'Untitled',
-                    uri: uri,
-                    youtube_id: ytId,
-                    duration: vid.duration || null,
-                    position: v + 1
-                });
-                vidCount++;
-            }
-            rel.video_count = vidCount;
-            rel.synced_at = new Date().toISOString();
-            await dbPut('releases', rel);
-        } catch (err) {
-            console.error('Error fetching release ' + rel.id + ':', err);
-        }
-        await sleep(1000);
+        await Promise.all(batch.map(function (rel) {
+            return discogsGet('/releases/' + rel.id, config).then(async function (data) {
+                var videos = (data.videos || []);
+                var vidCount = 0;
+                for (var v = 0; v < videos.length; v++) {
+                    var vid = videos[v];
+                    if (!vid.embed) continue;
+                    var uri = vid.uri || '';
+                    if (uri.indexOf('youtube.com') === -1 && uri.indexOf('youtu.be') === -1) continue;
+                    var ytId = extractYoutubeId(uri);
+                    if (!ytId) continue;
+                    await dbPut('videos', {
+                        id: rel.id + '_' + ytId,
+                        release_id: rel.id,
+                        title: vid.title || 'Untitled',
+                        uri: uri,
+                        youtube_id: ytId,
+                        duration: vid.duration || null,
+                        position: v + 1
+                    });
+                    vidCount++;
+                }
+                rel.video_count = vidCount;
+                rel.synced_at = new Date().toISOString();
+                await dbPut('releases', rel);
+                completed++;
+                showSyncBanner('Fetching videos: ' + completed + '/' + total + ' - ' + rel.artist + ' - ' + rel.title);
+            }).catch(function (err) {
+                completed++;
+                console.error('Error fetching release ' + rel.id + ':', err);
+            });
+        }));
+
+        // Ensure at least 1s per batch to stay under 60 req/min with 3 concurrent
+        var elapsed = Date.now() - batchStart;
+        if (elapsed < 1000) await sleep(1000 - elapsed);
     }
 }
 
