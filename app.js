@@ -124,11 +124,11 @@ function isConfigured() {
 
 async function discogsGet(path, config, _retries) {
     if (_retries === undefined) _retries = 3;
-    var headers = {
-        'Authorization': 'Discogs token=' + config.token,
-        'User-Agent': 'VinylCollectionPlayer/2.0'
-    };
-    var r = await fetch('https://api.discogs.com' + path, { headers: headers });
+    // Use query-param auth instead of Authorization header to avoid
+    // CORS preflight (OPTIONS) requests that Discogs blocks on some endpoints.
+    var separator = path.indexOf('?') === -1 ? '?' : '&';
+    var url = 'https://api.discogs.com' + path + separator + 'token=' + config.token;
+    var r = await fetch(url);
 
     // Rate limited — back off and retry
     if (r.status === 429) {
