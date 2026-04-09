@@ -128,13 +128,24 @@ async function discogsGet(path, config, _retries) {
         'Authorization': 'Discogs token=' + config.token,
         'User-Agent': 'VinylCollectionPlayer/2.0'
     };
-    var r = await fetch('https://api.discogs.com' + path, { headers: headers });
+    var r;
+    try {
+        r = await fetch('https://api.discogs.com' + path, { headers: headers });
+    } catch (err) {
+        // Network error or CORS block (429 without CORS headers shows up here)
+        if (_retries <= 0) throw err;
+        var backoff = (4 - _retries) * 15;
+        console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
+        showSyncBanner('Rate limited — waiting ' + backoff + 's...');
+        await sleep(backoff * 1000);
+        return discogsGet(path, config, _retries - 1);
+    }
 
-    // Rate limited — back off and retry
+    // Explicit 429
     if (r.status === 429) {
         if (_retries <= 0) throw new Error('Rate limited after retries');
         var wait = parseInt(r.headers.get('Retry-After') || '30') * 1000;
-        console.warn('Rate limited on ' + path + ', waiting ' + (wait / 1000) + 's...');
+        console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
         return discogsGet(path, config, _retries - 1);
@@ -266,6 +277,11 @@ async function syncCollection(config) {
         } catch (err) {
             console.error('Error fetching release ' + rel.id + ':', err);
         }
+
+        // Pace Phase 2: each request with Authorization header triggers CORS
+        // preflight (OPTIONS + GET = 2 HTTP calls). 1.5s gap keeps us well
+        // under the 60 req/min Discogs limit.
+        if (vi < unsynced.length - 1) await sleep(1500);
     }
 }
 
