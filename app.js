@@ -6,7 +6,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 2;
+var DB_VERSION = 3;
 var _db = null;
 
 function openDB() {
@@ -32,6 +32,13 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains('config')) {
                 db.createObjectStore('config', { keyPath: 'key' });
+            }
+            if (!db.objectStoreNames.contains('track_meta')) {
+                var tm = db.createObjectStore('track_meta', { keyPath: 'id' });
+                tm.createIndex('release_id', 'release_id');
+                tm.createIndex('bpm', 'bpm');
+                tm.createIndex('key', 'key');
+                tm.createIndex('rating', 'rating');
             }
         };
         req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
@@ -93,6 +100,44 @@ function dbClear(store) {
             tx.onerror = function (e) { reject(e.target.error); };
         });
     });
+}
+
+function dbDelete(store, key) {
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(store, 'readwrite');
+            tx.objectStore(store).delete(key);
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function (e) { reject(e.target.error); };
+        });
+    });
+}
+
+// ============ Track Metadata Helpers ============
+
+function trackMetaId(releaseId, youtubeId) {
+    return releaseId + '_' + youtubeId;
+}
+
+function getTrackMeta(id) {
+    return dbGet('track_meta', id);
+}
+
+function saveTrackMeta(id, patch) {
+    return getTrackMeta(id).then(function (existing) {
+        var rec = existing || { id: id };
+        for (var k in patch) rec[k] = patch[k];
+        rec.updated_at = new Date().toISOString();
+        return dbPut('track_meta', rec);
+    });
+}
+
+function ratingStars(n) {
+    n = Math.max(0, Math.min(5, parseInt(n, 10) || 0));
+    var out = '';
+    for (var i = 0; i < n; i++) out += '\u2605';
+    for (var j = n; j < 5; j++) out += '\u2606';
+    return out;
 }
 
 // ============ Config Helpers ============
@@ -575,10 +620,13 @@ function renderCollection() {
 function renderRelease(releaseId) {
     Promise.all([
         dbGet('releases', releaseId),
-        dbGetByIndex('videos', 'release_id', releaseId)
+        dbGetByIndex('videos', 'release_id', releaseId),
+        dbGetByIndex('track_meta', 'release_id', releaseId)
     ]).then(function (results) {
         var r = results[0];
         var videos = results[1].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+        var metaById = {};
+        (results[2] || []).forEach(function (m) { metaById[m.id] = m; });
 
         if (!r) { navigate('collection'); return; }
 
@@ -633,13 +681,26 @@ function renderRelease(releaseId) {
         if (videos.length > 0) {
             html += '<div class="video-list">';
             videos.forEach(function (vid) {
-                html += '<div class="video-item" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '">' +
+                var metaId = r.id + '_' + vid.youtube_id;
+                var meta = metaById[metaId] || null;
+                html += '<div class="video-item" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '" data-release-id="' + r.id + '" data-meta-id="' + escHtml(metaId) + '">' +
                     '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>' +
                     '<div class="video-info"><span class="video-title">' + escHtml(vid.title) + '</span>';
+                if (meta) {
+                    html += '<span class="track-badges">';
+                    if (meta.bpm != null && meta.bpm !== '') html += '<span class="track-badge badge-bpm">' + meta.bpm + ' BPM</span>';
+                    if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
+                    if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
+                    if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
+                    html += '</span>';
+                }
                 if (vid.duration) {
                     html += '<span class="video-duration">' + escHtml(String(vid.duration)) + '</span>';
                 }
-                html += '</div></div>';
+                html += '</div>' +
+                    '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + metaId + '\')" title="Edit metadata">&#9998;</button>' +
+                    '</div>' +
+                    '<div class="track-meta-editor" id="editor-' + metaId + '" style="display:none;"></div>';
             });
             html += '</div>';
         } else {
@@ -935,6 +996,81 @@ function _restorePlayerState() {
         }
         updatePlayPauseBtn();
     } catch (e) { console.warn('Failed to restore player state:', e); }
+}
+
+// ============ Track Metadata Editor ============
+
+function toggleTrackMetaEditor(metaId) {
+    var panel = document.getElementById('editor-' + metaId);
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+        renderTrackMetaEditor(panel, metaId);
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function renderTrackMetaEditor(panel, metaId) {
+    var idx = metaId.indexOf('_');
+    var releaseId = parseInt(metaId.substring(0, idx), 10);
+    var youtubeId = metaId.substring(idx + 1);
+    getTrackMeta(metaId).then(function (meta) {
+        meta = meta || {};
+        var camelots = [];
+        for (var n = 1; n <= 12; n++) { camelots.push(n + 'A'); camelots.push(n + 'B'); }
+        var keyOptions = '<option value="">&mdash;</option>';
+        for (var ki = 0; ki < camelots.length; ki++) {
+            var k = camelots[ki];
+            keyOptions += '<option value="' + k + '"' + (meta.key === k ? ' selected' : '') + '>' + k + '</option>';
+        }
+        var ratingOptions = '';
+        for (var rv = 0; rv <= 5; rv++) {
+            var label = rv === 0 ? '&mdash;' : ratingStars(rv);
+            ratingOptions += '<option value="' + rv + '"' + ((meta.rating || 0) === rv ? ' selected' : '') + '>' + label + '</option>';
+        }
+        var tagsStr = (meta.tags || []).join(', ');
+        var id = metaId;
+        panel.innerHTML =
+            '<div class="meta-grid">' +
+            '<label class="meta-field"><span>BPM</span><input type="number" step="0.1" min="40" max="220" id="mf-bpm-' + id + '" value="' + (meta.bpm != null ? meta.bpm : '') + '"></label>' +
+            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '">' + keyOptions + '</select></label>' +
+            '<label class="meta-field"><span>Rating</span><select id="mf-rating-' + id + '">' + ratingOptions + '</select></label>' +
+            '<label class="meta-field"><span>Energy 1-10</span><input type="number" min="1" max="10" id="mf-energy-' + id + '" value="' + (meta.energy != null ? meta.energy : '') + '"></label>' +
+            '<label class="meta-field"><span>Shelf</span><input type="text" id="mf-shelf-' + id + '" value="' + escHtml(meta.shelf || '') + '" placeholder="e.g. A3"></label>' +
+            '<label class="meta-field wide"><span>Tags (comma-separated)</span><input type="text" id="mf-tags-' + id + '" value="' + escHtml(tagsStr) + '" placeholder="peak, closer, floor filler"></label>' +
+            '<label class="meta-field wide"><span>Notes</span><textarea id="mf-notes-' + id + '" rows="2">' + escHtml(meta.notes || '') + '</textarea></label>' +
+            '<label class="meta-field checkbox"><input type="checkbox" id="mf-verified-' + id + '"' + (meta.verified ? ' checked' : '') + '> <span>YouTube link verified</span></label>' +
+            '</div>' +
+            '<div class="meta-actions">' +
+            '<button class="btn" onclick="toggleTrackMetaEditor(\'' + id + '\')">Cancel</button>' +
+            '<button class="btn btn-primary" onclick="saveTrackMetaFromForm(\'' + id + '\',' + releaseId + ',\'' + youtubeId + '\')">Save</button>' +
+            '</div>';
+    });
+}
+
+function saveTrackMetaFromForm(metaId, releaseId, youtubeId) {
+    var bpmRaw = document.getElementById('mf-bpm-' + metaId).value.trim();
+    var bpm = bpmRaw === '' ? null : parseFloat(bpmRaw);
+    var energyRaw = document.getElementById('mf-energy-' + metaId).value.trim();
+    var energy = energyRaw === '' ? null : parseInt(energyRaw, 10);
+    var rating = parseInt(document.getElementById('mf-rating-' + metaId).value, 10);
+    var tagsRaw = document.getElementById('mf-tags-' + metaId).value.trim();
+    var patch = {
+        release_id: releaseId,
+        youtube_id: youtubeId,
+        bpm: (bpm != null && isFinite(bpm)) ? bpm : null,
+        key: document.getElementById('mf-key-' + metaId).value || null,
+        rating: rating > 0 ? rating : null,
+        energy: (energy != null && isFinite(energy)) ? energy : null,
+        shelf: document.getElementById('mf-shelf-' + metaId).value.trim() || '',
+        tags: tagsRaw ? tagsRaw.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return !!t; }) : [],
+        notes: document.getElementById('mf-notes-' + metaId).value.trim() || '',
+        verified: document.getElementById('mf-verified-' + metaId).checked
+    };
+    saveTrackMeta(metaId, patch).then(function () {
+        renderCurrentView();
+    });
 }
 
 // ============ Utility ============
