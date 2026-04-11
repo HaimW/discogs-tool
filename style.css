@@ -61,6 +61,13 @@ a:hover { color: var(--accent-hover); }
 .nav-brand:hover { color: var(--accent); }
 .vinyl-icon { font-size: 22px; color: var(--accent); }
 
+.nav-links { display: flex; gap: 4px; margin-left: 24px; flex: 1; }
+.nav-link {
+    padding: 8px 14px; font-size: 13px; color: var(--text-muted);
+    border-radius: var(--radius-sm); transition: all 0.2s; cursor: pointer;
+}
+.nav-link:hover { color: var(--text); background: var(--bg-hover); }
+
 /* ============ BUTTONS ============ */
 
 .btn {
@@ -330,6 +337,66 @@ a:hover { color: var(--accent-hover); }
 .np-btn-main { width: 42px; height: 42px; border-color: var(--accent); color: var(--accent); font-size: 14px; }
 .np-btn-main:hover { background: var(--accent); color: #000; }
 .np-btn-close { font-size: 18px; margin-left: 8px; }
+
+/* ============ TRACKS VIEW ============ */
+
+.track-filters {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 16px;
+    padding: 12px 14px; background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+}
+.track-filter-group {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.track-filter-group > label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--text-dim); font-weight: 600; margin-right: 4px;
+}
+.bpm-input {
+    width: 60px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text);
+    font-family: var(--font-mono); font-size: 12px; outline: none;
+}
+.bpm-input:focus { border-color: var(--accent); }
+.bpm-dash { color: var(--text-dim); font-size: 12px; }
+.track-filter-group select {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text);
+    font-family: var(--font-mono); font-size: 12px; outline: none; cursor: pointer;
+}
+.track-filter-group select:focus { border-color: var(--accent); }
+
+.rating-pill {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 12px;
+    font-size: 11px; color: var(--text-muted); cursor: pointer;
+    transition: all 0.2s; white-space: nowrap; letter-spacing: 1px;
+}
+.rating-pill:hover, .rating-pill.active {
+    border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+}
+
+.tracks-list .track-row { padding: 8px 12px; }
+.track-thumb {
+    flex-shrink: 0; width: 48px; height: 48px; border-radius: 3px;
+    object-fit: cover; background: var(--bg);
+}
+.track-thumb.no-thumb {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-dim); font-size: 24px;
+}
+.track-row .track-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.track-title-line {
+    font-size: 14px; color: var(--text); font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.track-sub-line {
+    font-size: 12px; color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.t-artist, .t-release { cursor: pointer; }
+.t-artist:hover, .t-release:hover { color: var(--accent); }
+.t-year { color: var(--text-dim); }
 
 /* ============ TRACK METADATA ============ */
 
