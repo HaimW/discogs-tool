@@ -176,13 +176,24 @@ function startSync() {
         _syncRunning = true;
         document.getElementById('sync-btn').disabled = true;
         showSyncBanner('Starting sync...');
+        // Phase 0 + 1: fetch folders and release metadata. Blocking — we need
+        // this before the user can browse anything.
         syncCollection(config).then(function () {
-            showSyncBanner('Sync complete!');
-            setTimeout(function () { hideSyncBanner(); navigate('collection'); }, 1500);
+            // Jump to the collection immediately so the user can browse while
+            // Phase 2 (video fetching) runs in the background.
+            navigate('collection');
+            showSyncBanner('Collection ready — fetching videos in background...');
+            // Fire and forget: syncVideosInBackground() manages its own banner,
+            // _syncRunning flag, and sync button state when it finishes.
+            syncVideosInBackground(config).catch(function (err) {
+                showSyncBanner('Video sync failed: ' + err.message);
+                console.error(err);
+                _syncRunning = false;
+                document.getElementById('sync-btn').disabled = false;
+            });
         }).catch(function (err) {
             showSyncBanner('Sync failed: ' + err.message);
             console.error(err);
-        }).finally(function () {
             _syncRunning = false;
             document.getElementById('sync-btn').disabled = false;
         });
@@ -236,18 +247,34 @@ async function syncCollection(config) {
         }
         await dbPut('releases', newRel);
     }
+}
 
-    // Phase 2: Fetch videos — sequential with rate-limit-aware pacing.
-    // Each browser fetch with Authorization header triggers a CORS preflight,
-    // so each logical request = 2 HTTP calls. We go one at a time and let
-    // discogsGet() handle 429 retries and proactive back-off.
+// Phase 2 runs in the background so the user can browse the collection
+// while videos trickle in. Called from startSync() after syncCollection()
+// resolves. Not awaited — it updates the banner independently.
+async function syncVideosInBackground(config) {
     var releases = await dbGetAll('releases');
     var unsynced = releases.filter(function (r) { return !r.synced_at; });
     var total = unsynced.length;
+    if (total === 0) {
+        hideSyncBanner();
+        _syncRunning = false;
+        document.getElementById('sync-btn').disabled = false;
+        return;
+    }
+
+    var startTime = Date.now();
+    var rerenderEvery = 5; // re-render collection every N releases so new videos appear
 
     for (var vi = 0; vi < unsynced.length; vi++) {
         var rel = unsynced[vi];
-        showSyncBanner('Fetching videos: ' + (vi + 1) + '/' + total + ' - ' + rel.artist + ' - ' + rel.title);
+        var done = vi + 1;
+        var elapsed = (Date.now() - startTime) / 1000;
+        var avg = done > 1 ? elapsed / (done - 1) : 1.2;
+        var remaining = Math.max(0, Math.round(avg * (total - done)));
+        var etaStr = formatEta(remaining);
+        showSyncBanner('Fetching videos: ' + done + '/' + total +
+                       ' (ETA ' + etaStr + ') - ' + rel.artist + ' - ' + rel.title);
 
         try {
             var data = await discogsGet('/releases/' + rel.id, config);
@@ -278,11 +305,30 @@ async function syncCollection(config) {
             console.error('Error fetching release ' + rel.id + ':', err);
         }
 
+        // Re-render collection periodically so new video counts show up
+        // while the user browses. Only if they're on the collection view.
+        if (done % rerenderEvery === 0 && _currentView !== 'setup' && _currentView !== 'release') {
+            renderCollection();
+        }
+
         // Pace Phase 2: each request with Authorization header triggers CORS
-        // preflight (OPTIONS + GET = 2 HTTP calls). 1.5s gap keeps us well
-        // under the 60 req/min Discogs limit.
-        if (vi < unsynced.length - 1) await sleep(1500);
+        // preflight (OPTIONS + GET = 2 HTTP calls). 1.1s gap keeps us just
+        // under the 60 req/min Discogs limit with a small safety margin.
+        if (vi < unsynced.length - 1) await sleep(1100);
     }
+
+    showSyncBanner('Sync complete!');
+    if (_currentView !== 'setup' && _currentView !== 'release') renderCollection();
+    setTimeout(function () { hideSyncBanner(); }, 2000);
+    _syncRunning = false;
+    document.getElementById('sync-btn').disabled = false;
+}
+
+function formatEta(seconds) {
+    if (seconds < 60) return seconds + 's';
+    var m = Math.floor(seconds / 60);
+    var s = seconds % 60;
+    return m + 'm ' + s + 's';
 }
 
 async function fetchFolderReleases(config, folderId, allReleases, tagFolderId) {
