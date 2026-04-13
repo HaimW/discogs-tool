@@ -14,6 +14,11 @@
             <span class="vinyl-icon">&#9898;</span>
             Vinyl Collection Player
         </a>
+        <div class="nav-links">
+            <a href="#" class="nav-link" onclick="navigate('collection'); return false;">Collection</a>
+            <a href="#" class="nav-link" onclick="navigate('tracks'); return false;">Tracks</a>
+            <a href="#" class="nav-link" onclick="navigate('setlists'); return false;">Setlists</a>
+        </div>
         <div class="nav-actions">
             <button class="btn btn-sync" id="sync-btn" onclick="startSync()">
                 <span class="sync-icon">&#8635;</span>
@@ -44,6 +49,7 @@
             <div id="player-container"></div>
         </div>
         <div class="np-controls">
+            <button id="np-suggest" class="np-btn np-btn-suggest" title="Suggest next track (harmonic match)">Suggest</button>
             <button id="np-prev" class="np-btn" title="Previous">&#9664;&#9664;</button>
             <button id="np-play-pause" class="np-btn np-btn-main" title="Play/Pause">&#9654;</button>
             <button id="np-next" class="np-btn" title="Next">&#9654;&#9654;</button>

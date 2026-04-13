@@ -6,7 +6,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 2;
+var DB_VERSION = 4;
 var _db = null;
 
 function openDB() {
@@ -32,6 +32,18 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains('config')) {
                 db.createObjectStore('config', { keyPath: 'key' });
+            }
+            if (!db.objectStoreNames.contains('track_meta')) {
+                var tm = db.createObjectStore('track_meta', { keyPath: 'id' });
+                tm.createIndex('release_id', 'release_id');
+                tm.createIndex('bpm', 'bpm');
+                tm.createIndex('key', 'key');
+                tm.createIndex('rating', 'rating');
+            }
+            if (!db.objectStoreNames.contains('setlists')) {
+                var sl = db.createObjectStore('setlists', { keyPath: 'id', autoIncrement: true });
+                sl.createIndex('name', 'name');
+                sl.createIndex('updated_at', 'updated_at');
             }
         };
         req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
@@ -93,6 +105,44 @@ function dbClear(store) {
             tx.onerror = function (e) { reject(e.target.error); };
         });
     });
+}
+
+function dbDelete(store, key) {
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(store, 'readwrite');
+            tx.objectStore(store).delete(key);
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function (e) { reject(e.target.error); };
+        });
+    });
+}
+
+// ============ Track Metadata Helpers ============
+
+function trackMetaId(releaseId, youtubeId) {
+    return releaseId + '_' + youtubeId;
+}
+
+function getTrackMeta(id) {
+    return dbGet('track_meta', id);
+}
+
+function saveTrackMeta(id, patch) {
+    return getTrackMeta(id).then(function (existing) {
+        var rec = existing || { id: id };
+        for (var k in patch) rec[k] = patch[k];
+        rec.updated_at = new Date().toISOString();
+        return dbPut('track_meta', rec);
+    });
+}
+
+function ratingStars(n) {
+    n = Math.max(0, Math.min(5, parseInt(n, 10) || 0));
+    var out = '';
+    for (var i = 0; i < n; i++) out += '\u2605';
+    for (var j = n; j < 5; j++) out += '\u2606';
+    return out;
 }
 
 // ============ Config Helpers ============
@@ -393,7 +443,11 @@ function extractYoutubeId(uri) {
 // ============ SPA Router ============
 
 var _currentView = '';
-var _filters = { q: '', genre: '', folder: '', sort: 'artist', page: 1 };
+var _filters = {
+    q: '', genre: '', folder: '', sort: 'artist', page: 1,
+    tracks: { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 },
+    setlistId: null
+};
 
 function navigate(view, params) {
     _currentView = view;
@@ -412,6 +466,9 @@ function renderCurrentView() {
         switch (_currentView) {
             case 'setup': renderSetup(); break;
             case 'release': renderRelease(_filters.releaseId); break;
+            case 'tracks': renderTracks(); break;
+            case 'setlists': renderSetlists(); break;
+            case 'setlist': renderSetlist(_filters.setlistId); break;
             default: renderCollection(); break;
         }
     });
@@ -619,15 +676,247 @@ function renderCollection() {
     });
 }
 
+// ============ Tracks View ============
+
+function renderTracks() {
+    Promise.all([
+        dbGetAll('videos'),
+        dbGetAll('releases'),
+        dbGetAll('track_meta')
+    ]).then(function (results) {
+        var allVideos = results[0];
+        var allReleases = results[1];
+        var allMeta = results[2];
+
+        var tf = _filters.tracks;
+        var relById = {};
+        allReleases.forEach(function (r) { relById[r.id] = r; });
+        var metaById = {};
+        allMeta.forEach(function (m) { metaById[m.id] = m; });
+
+        // Flatten to rows
+        var rows = allVideos.map(function (v) {
+            var r = relById[v.release_id] || {};
+            var m = metaById[v.release_id + '_' + v.youtube_id] || {};
+            return {
+                metaId: v.release_id + '_' + v.youtube_id,
+                youtubeId: v.youtube_id,
+                videoTitle: v.title || '',
+                duration: v.duration || null,
+                artist: r.artist || 'Unknown',
+                releaseTitle: r.title || '',
+                releaseId: v.release_id,
+                year: r.year || null,
+                genres: r.genres || '',
+                cover: r.thumb_url || '',
+                bpm: m.bpm != null ? m.bpm : null,
+                key: m.key || null,
+                rating: m.rating || null,
+                shelf: m.shelf || '',
+                tags: m.tags || []
+            };
+        });
+
+        // Filter
+        var q = (tf.q || '').toLowerCase();
+        if (q) {
+            rows = rows.filter(function (row) {
+                return row.videoTitle.toLowerCase().indexOf(q) !== -1 ||
+                       row.artist.toLowerCase().indexOf(q) !== -1 ||
+                       row.releaseTitle.toLowerCase().indexOf(q) !== -1;
+            });
+        }
+        if (tf.bpmMin !== '' && tf.bpmMin != null) {
+            var minB = parseFloat(tf.bpmMin);
+            if (isFinite(minB)) rows = rows.filter(function (row) { return row.bpm != null && row.bpm >= minB; });
+        }
+        if (tf.bpmMax !== '' && tf.bpmMax != null) {
+            var maxB = parseFloat(tf.bpmMax);
+            if (isFinite(maxB)) rows = rows.filter(function (row) { return row.bpm != null && row.bpm <= maxB; });
+        }
+        if (tf.key) {
+            rows = rows.filter(function (row) { return row.key === tf.key; });
+        }
+        if (tf.minRating) {
+            var mr = parseInt(tf.minRating, 10);
+            rows = rows.filter(function (row) { return (row.rating || 0) >= mr; });
+        }
+        if (tf.tag) {
+            rows = rows.filter(function (row) { return row.tags.indexOf(tf.tag) !== -1; });
+        }
+
+        // Sort
+        var sortKey = tf.sort || 'artist';
+        rows.sort(function (a, b) {
+            switch (sortKey) {
+                case 'title': return (a.videoTitle || '').localeCompare(b.videoTitle || '');
+                case 'year': return (b.year || 0) - (a.year || 0);
+                case 'bpm': return (b.bpm || 0) - (a.bpm || 0);
+                case 'rating': return (b.rating || 0) - (a.rating || 0);
+                case 'release': return (a.releaseTitle || '').localeCompare(b.releaseTitle || '');
+                default: return (a.artist || '').localeCompare(b.artist || '');
+            }
+        });
+
+        // Paginate
+        var perPage = 48;
+        var page = tf.page || 1;
+        var totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+        if (page > totalPages) page = totalPages;
+        var start = (page - 1) * perPage;
+        var pageRows = rows.slice(start, start + perPage);
+
+        // Collect unique tags
+        var tagSet = {};
+        allMeta.forEach(function (m) { (m.tags || []).forEach(function (t) { if (t) tagSet[t] = true; }); });
+        var tagList = Object.keys(tagSet).sort();
+
+        // Build HTML
+        var html = '';
+        html += '<div class="collection-header"><div class="collection-stats">' +
+            '<h1>All Tracks</h1>' +
+            '<span class="stat-count">' + rows.length + ' tracks</span>' +
+            '</div>' +
+            '<div class="search-bar">' +
+            '<input type="text" class="search-input" id="tracks-search-input" placeholder="Search title, artist, release..." value="' + escHtml(tf.q) + '" onkeydown="if(event.key===\'Enter\')tDoSearch()">' +
+            '<button class="btn btn-search" onclick="tDoSearch()">Search</button>' +
+            (tf.q ? '<button class="btn btn-clear" onclick="tClearSearch()">Clear</button>' : '') +
+            '</div></div>';
+
+        // Filters
+        html += '<div class="track-filters">';
+        html += '<div class="track-filter-group"><label>BPM</label>' +
+            '<input type="number" class="bpm-input" placeholder="min" value="' + escHtml(tf.bpmMin) + '" onchange="tSetBpm(\'bpmMin\', this.value)">' +
+            '<span class="bpm-dash">&ndash;</span>' +
+            '<input type="number" class="bpm-input" placeholder="max" value="' + escHtml(tf.bpmMax) + '" onchange="tSetBpm(\'bpmMax\', this.value)">' +
+            '</div>';
+
+        html += '<div class="track-filter-group"><label>Key</label><select onchange="tSetFilter(\'key\', this.value)">';
+        html += '<option value=""' + (!tf.key ? ' selected' : '') + '>Any</option>';
+        for (var kn = 1; kn <= 12; kn++) {
+            ['A', 'B'].forEach(function (letter) {
+                var kv = kn + letter;
+                html += '<option value="' + kv + '"' + (tf.key === kv ? ' selected' : '') + '>' + kv + '</option>';
+            });
+        }
+        html += '</select></div>';
+
+        html += '<div class="track-filter-group"><label>Rating</label>';
+        [0, 1, 2, 3, 4, 5].forEach(function (v) {
+            var active = (parseInt(tf.minRating, 10) || 0) === v ? ' active' : '';
+            var label = v === 0 ? 'Any' : (ratingStars(v));
+            html += '<span class="rating-pill' + active + '" onclick="tSetFilter(\'minRating\', ' + v + ')">' + label + '</span>';
+        });
+        html += '</div>';
+
+        html += '<button class="btn btn-clear" onclick="tClearFilters()">Reset</button>';
+        html += '</div>';
+
+        // Tag pills
+        if (tagList.length > 0) {
+            html += '<div class="genre-pills"><span class="filter-label">Tag:</span>';
+            html += '<span class="genre-pill' + (!tf.tag ? ' active' : '') + '" onclick="tSetFilter(\'tag\',\'\')">All</span>';
+            tagList.forEach(function (t) {
+                html += '<span class="genre-pill' + (tf.tag === t ? ' active' : '') + '" onclick="tSetFilter(\'tag\',\'' + escHtml(t) + '\')">' + escHtml(t) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Sort bar
+        html += '<div class="sort-bar"><span class="sort-label">Sort by:</span>';
+        [['artist', 'Artist'], ['title', 'Title'], ['release', 'Release'], ['year', 'Year'], ['bpm', 'BPM'], ['rating', 'Rating']].forEach(function (pair) {
+            html += '<span class="sort-option' + (sortKey === pair[0] ? ' active' : '') + '" onclick="tSetSort(\'' + pair[0] + '\')">' + pair[1] + '</span>';
+        });
+        html += '</div>';
+
+        // Rows
+        if (pageRows.length === 0) {
+            html += '<div class="empty-state"><p class="empty-title">No tracks match.</p>' +
+                '<p class="empty-subtitle">Adjust the filters or clear them to see everything.</p>' +
+                '<button class="btn btn-primary" onclick="tClearFilters()">Clear filters</button></div>';
+        } else {
+            html += '<div class="video-list tracks-list">';
+            pageRows.forEach(function (row) {
+                html += '<div class="video-item track-row" data-youtube-id="' + escHtml(row.youtubeId) + '" data-title="' + escHtml(row.videoTitle) + '" data-artist="' + escHtml(row.artist) + '" data-cover="' + escHtml(row.cover) + '" data-release-id="' + row.releaseId + '" data-meta-id="' + escHtml(row.metaId) + '">' +
+                    '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>';
+                if (row.cover) {
+                    html += '<img class="track-thumb" src="' + escHtml(row.cover) + '" alt="" loading="lazy">';
+                } else {
+                    html += '<div class="track-thumb no-thumb">&#9898;</div>';
+                }
+                html += '<div class="track-info">' +
+                    '<div class="track-title-line">' + escHtml(row.videoTitle) + '</div>' +
+                    '<div class="track-sub-line">' +
+                        '<span class="t-artist" onclick="navigate(\'release\',{releaseId:' + row.releaseId + '})">' + escHtml(row.artist) + '</span>' +
+                        ' &middot; <span class="t-release" onclick="navigate(\'release\',{releaseId:' + row.releaseId + '})">' + escHtml(row.releaseTitle) + '</span>' +
+                        (row.year ? ' <span class="t-year">(' + row.year + ')</span>' : '') +
+                    '</div>' +
+                    '</div>';
+
+                html += '<span class="track-badges">';
+                if (row.bpm != null) html += '<span class="track-badge badge-bpm">' + row.bpm + '</span>';
+                if (row.key) html += '<span class="track-badge badge-key">' + escHtml(row.key) + '</span>';
+                if (row.rating) html += '<span class="track-badge badge-rating">' + ratingStars(row.rating) + '</span>';
+                if (row.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(row.shelf) + '</span>';
+                html += '</span>';
+
+                html += '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>';
+                html += '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + row.metaId + '\')" title="Edit metadata">&#9998;</button>';
+                html += '</div>';
+                html += '<div class="track-meta-editor" id="editor-' + row.metaId + '" style="display:none;"></div>';
+            });
+            html += '</div>';
+
+            // Pagination
+            if (totalPages > 1) {
+                html += '<div class="pagination">';
+                if (page > 1) html += '<span class="page-link" onclick="tGoPage(' + (page - 1) + ')">&laquo; Prev</span>';
+                for (var p = 1; p <= totalPages; p++) {
+                    if (p === page) {
+                        html += '<span class="page-link active">' + p + '</span>';
+                    } else if (p <= 3 || p > totalPages - 3 || (p >= page - 2 && p <= page + 2)) {
+                        html += '<span class="page-link" onclick="tGoPage(' + p + ')">' + p + '</span>';
+                    } else if (p === 4 || p === totalPages - 3) {
+                        html += '<span class="page-dots">...</span>';
+                    }
+                }
+                if (page < totalPages) html += '<span class="page-link" onclick="tGoPage(' + (page + 1) + ')">Next &raquo;</span>';
+                html += '</div>';
+            }
+        }
+
+        document.getElementById('app').innerHTML = html;
+    });
+}
+
+function tDoSearch() {
+    var el = document.getElementById('tracks-search-input');
+    _filters.tracks.q = el ? el.value.trim() : '';
+    _filters.tracks.page = 1;
+    renderTracks();
+}
+function tClearSearch() { _filters.tracks.q = ''; _filters.tracks.page = 1; renderTracks(); }
+function tSetFilter(k, v) { _filters.tracks[k] = v; _filters.tracks.page = 1; renderTracks(); }
+function tSetBpm(k, v) { _filters.tracks[k] = v; _filters.tracks.page = 1; renderTracks(); }
+function tSetSort(s) { _filters.tracks.sort = s; renderTracks(); }
+function tClearFilters() {
+    _filters.tracks = { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 };
+    renderTracks();
+}
+function tGoPage(p) { _filters.tracks.page = p; renderTracks(); window.scrollTo(0, 0); }
+
 // ============ Release Detail View ============
 
 function renderRelease(releaseId) {
     Promise.all([
         dbGet('releases', releaseId),
-        dbGetByIndex('videos', 'release_id', releaseId)
+        dbGetByIndex('videos', 'release_id', releaseId),
+        dbGetByIndex('track_meta', 'release_id', releaseId)
     ]).then(function (results) {
         var r = results[0];
         var videos = results[1].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+        var metaById = {};
+        (results[2] || []).forEach(function (m) { metaById[m.id] = m; });
 
         if (!r) { navigate('collection'); return; }
 
@@ -682,13 +971,27 @@ function renderRelease(releaseId) {
         if (videos.length > 0) {
             html += '<div class="video-list">';
             videos.forEach(function (vid) {
-                html += '<div class="video-item" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '">' +
+                var metaId = r.id + '_' + vid.youtube_id;
+                var meta = metaById[metaId] || null;
+                html += '<div class="video-item" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '" data-release-id="' + r.id + '" data-meta-id="' + escHtml(metaId) + '">' +
                     '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>' +
                     '<div class="video-info"><span class="video-title">' + escHtml(vid.title) + '</span>';
+                if (meta) {
+                    html += '<span class="track-badges">';
+                    if (meta.bpm != null && meta.bpm !== '') html += '<span class="track-badge badge-bpm">' + meta.bpm + ' BPM</span>';
+                    if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
+                    if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
+                    if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
+                    html += '</span>';
+                }
                 if (vid.duration) {
                     html += '<span class="video-duration">' + escHtml(String(vid.duration)) + '</span>';
                 }
-                html += '</div></div>';
+                html += '</div>' +
+                    '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>' +
+                    '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + metaId + '\')" title="Edit metadata">&#9998;</button>' +
+                    '</div>' +
+                    '<div class="track-meta-editor" id="editor-' + metaId + '" style="display:none;"></div>';
             });
             html += '</div>';
         } else {
@@ -740,6 +1043,376 @@ function clearAllFilters() {
     _filters.folder = '';
     _filters.page = 1;
     renderCollection();
+}
+
+// ============ Setlists ============
+
+function createSetlist(name) {
+    var now = new Date().toISOString();
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction('setlists', 'readwrite');
+            var req = tx.objectStore('setlists').add({
+                name: name || 'Untitled setlist',
+                created_at: now,
+                updated_at: now,
+                tracks: [],
+                notes: ''
+            });
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function (e) { reject(e.target.error); };
+        });
+    });
+}
+
+function addTrackToSetlist(setlistId, track) {
+    return dbGet('setlists', setlistId).then(function (sl) {
+        if (!sl) return;
+        sl.tracks = sl.tracks || [];
+        sl.tracks.push({
+            youtubeId: track.youtubeId,
+            title: track.title,
+            artist: track.artist || '',
+            cover: track.cover || '',
+            releaseId: track.releaseId || null,
+            metaId: track.metaId || null
+        });
+        sl.updated_at = new Date().toISOString();
+        return dbPut('setlists', sl).then(function () {
+            showSyncBanner('Added to "' + sl.name + '"');
+            setTimeout(hideSyncBanner, 1200);
+        });
+    });
+}
+
+function removeTrackFromSetlist(id, idx) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        sl.tracks.splice(idx, 1);
+        sl.updated_at = new Date().toISOString();
+        dbPut('setlists', sl).then(function () { renderSetlist(id); });
+    });
+}
+
+function reorderSetlistTrack(id, idx, dir) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        var newIdx = idx + dir;
+        if (newIdx < 0 || newIdx >= sl.tracks.length) return;
+        var tmp = sl.tracks[idx];
+        sl.tracks[idx] = sl.tracks[newIdx];
+        sl.tracks[newIdx] = tmp;
+        sl.updated_at = new Date().toISOString();
+        dbPut('setlists', sl).then(function () { renderSetlist(id); });
+    });
+}
+
+function renameSetlist(id, name) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        var trimmed = (name || '').trim();
+        if (!trimmed) return;
+        sl.name = trimmed;
+        sl.updated_at = new Date().toISOString();
+        dbPut('setlists', sl);
+    });
+}
+
+function saveSetlistNotes(id, notes) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        sl.notes = notes || '';
+        sl.updated_at = new Date().toISOString();
+        dbPut('setlists', sl);
+    });
+}
+
+function deleteSetlist(id) {
+    if (!confirm('Delete this setlist? This cannot be undone.')) return;
+    dbDelete('setlists', id).then(function () { navigate('setlists'); });
+}
+
+function promptNewSetlist() {
+    var name = prompt('Name for new setlist:');
+    if (!name) return;
+    createSetlist(name.trim()).then(function (newId) {
+        navigate('setlist', { setlistId: newId });
+    });
+}
+
+// ------ Add-to-setlist popover ------
+
+function openAddToSetlistPopover(btn) {
+    closeAllPopovers();
+    var row = btn.closest('.video-item');
+    if (!row) return;
+    var track = {
+        youtubeId: row.dataset.youtubeId,
+        title: row.dataset.title,
+        artist: row.dataset.artist,
+        cover: row.dataset.cover,
+        releaseId: parseInt(row.dataset.releaseId, 10) || null,
+        metaId: row.dataset.metaId || null
+    };
+    dbGetAll('setlists').then(function (setlists) {
+        setlists.sort(function (a, b) { return (b.updated_at || '').localeCompare(a.updated_at || ''); });
+        var pop = document.createElement('div');
+        pop.className = 'popover add-to-setlist-popover';
+        var html = '<div class="popover-title">Add to setlist</div>';
+        if (setlists.length === 0) {
+            html += '<div class="popover-empty">No setlists yet</div>';
+        } else {
+            setlists.forEach(function (sl) {
+                html += '<div class="popover-item" data-id="' + sl.id + '">' +
+                    '<span class="popover-item-name">' + escHtml(sl.name) + '</span>' +
+                    '<span class="popover-item-count">' + ((sl.tracks || []).length) + '</span>' +
+                    '</div>';
+            });
+        }
+        html += '<div class="popover-divider"></div>';
+        html += '<div class="popover-item popover-new">+ New setlist...</div>';
+        pop.innerHTML = html;
+        document.body.appendChild(pop);
+
+        // Position near button
+        var rect = btn.getBoundingClientRect();
+        pop.style.position = 'absolute';
+        pop.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+        var left = rect.right + window.scrollX - 240;
+        if (left < 8) left = 8;
+        pop.style.left = left + 'px';
+
+        // Wire clicks
+        pop.querySelectorAll('.popover-item[data-id]').forEach(function (el) {
+            el.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var id = parseInt(el.getAttribute('data-id'), 10);
+                addTrackToSetlist(id, track).then(closeAllPopovers);
+            });
+        });
+        var newBtn = pop.querySelector('.popover-new');
+        newBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var name = prompt('Name for new setlist:');
+            if (!name) { closeAllPopovers(); return; }
+            createSetlist(name.trim()).then(function (newId) {
+                addTrackToSetlist(newId, track).then(closeAllPopovers);
+            });
+        });
+
+        setTimeout(function () {
+            document.addEventListener('click', _popoverOutsideHandler);
+        }, 0);
+    });
+}
+
+function _popoverOutsideHandler(e) {
+    var pop = document.querySelector('.popover');
+    if (pop && !pop.contains(e.target)) closeAllPopovers();
+}
+
+function closeAllPopovers() {
+    document.querySelectorAll('.popover').forEach(function (p) { p.remove(); });
+    document.removeEventListener('click', _popoverOutsideHandler);
+}
+
+// ------ Setlists index view ------
+
+function renderSetlists() {
+    dbGetAll('setlists').then(function (setlists) {
+        setlists.sort(function (a, b) { return (b.updated_at || '').localeCompare(a.updated_at || ''); });
+        var html = '<div class="collection-header"><div class="collection-stats">' +
+            '<h1>Setlists</h1>' +
+            '<span class="stat-count">' + setlists.length + ' setlist' + (setlists.length === 1 ? '' : 's') + '</span>' +
+            '<button class="btn btn-primary" onclick="promptNewSetlist()">+ New Setlist</button>' +
+            '</div></div>';
+        if (setlists.length === 0) {
+            html += '<div class="empty-state"><p class="empty-title">No setlists yet</p>' +
+                '<p class="empty-subtitle">Create a setlist to prep your next gig</p>' +
+                '<button class="btn btn-primary btn-large" onclick="promptNewSetlist()">+ New Setlist</button></div>';
+        } else {
+            html += '<div class="setlist-index">';
+            setlists.forEach(function (sl) {
+                var count = (sl.tracks || []).length;
+                var updated = (sl.updated_at || '').substring(0, 10);
+                html += '<div class="setlist-card" onclick="navigate(\'setlist\',{setlistId:' + sl.id + '})">' +
+                    '<div class="setlist-card-name">' + escHtml(sl.name) + '</div>' +
+                    '<div class="setlist-card-meta">' + count + ' track' + (count === 1 ? '' : 's') + ' &middot; updated ' + updated + '</div>' +
+                    '</div>';
+            });
+            html += '</div>';
+        }
+        document.getElementById('app').innerHTML = html;
+    });
+}
+
+// ------ Setlist detail view ------
+
+function renderSetlist(setlistId) {
+    if (!setlistId) { navigate('setlists'); return; }
+    Promise.all([dbGet('setlists', setlistId), dbGetAll('track_meta')]).then(function (results) {
+        var sl = results[0];
+        if (!sl) { navigate('setlists'); return; }
+        var metaById = {};
+        results[1].forEach(function (m) { metaById[m.id] = m; });
+        var tracks = sl.tracks || [];
+
+        var html = '<span class="back-link" onclick="navigate(\'setlists\')">&larr; Back to setlists</span>';
+        html += '<div class="setlist-detail">';
+        html += '<div class="setlist-header">' +
+            '<input type="text" class="setlist-name-input" value="' + escHtml(sl.name) + '" onchange="renameSetlist(' + sl.id + ', this.value)">' +
+            '<div class="setlist-actions">' +
+                '<button class="btn btn-play-all"' + (tracks.length === 0 ? ' disabled' : '') + ' onclick="playSetlist(' + sl.id + ')">&#9654; Play all</button>' +
+                '<div class="setlist-export">' +
+                    '<button class="btn"' + (tracks.length === 0 ? ' disabled' : '') + ' onclick="toggleExportMenu(' + sl.id + ')">Export &#9662;</button>' +
+                    '<div class="export-menu popover" id="export-menu-' + sl.id + '" style="display:none;">' +
+                        '<div class="popover-item" onclick="exportSetlistM3U(' + sl.id + ');toggleExportMenu(' + sl.id + ')">M3U playlist</div>' +
+                        '<div class="popover-item" onclick="exportSetlistTxt(' + sl.id + ');toggleExportMenu(' + sl.id + ')">Plain text (.txt)</div>' +
+                        '<div class="popover-item" onclick="exportSetlistCsv(' + sl.id + ');toggleExportMenu(' + sl.id + ')">CSV with BPM/key</div>' +
+                    '</div>' +
+                '</div>' +
+                '<button class="btn btn-danger" onclick="deleteSetlist(' + sl.id + ')">Delete</button>' +
+            '</div>' +
+        '</div>';
+        html += '<textarea class="setlist-notes" placeholder="Setlist notes (venue, vibe, intro track idea...)" onchange="saveSetlistNotes(' + sl.id + ', this.value)">' + escHtml(sl.notes || '') + '</textarea>';
+
+        if (tracks.length === 0) {
+            html += '<div class="empty-state"><p class="empty-title">Empty setlist</p>' +
+                '<p class="empty-subtitle">Add tracks from Collection or All Tracks view using the + button</p></div>';
+        } else {
+            html += '<div class="video-list setlist-tracklist">';
+            tracks.forEach(function (t, i) {
+                var meta = metaById[t.metaId] || {};
+                var last = i === tracks.length - 1;
+                html += '<div class="video-item setlist-row" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + (t.releaseId || '') + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
+                    '<span class="setlist-num">' + (i + 1) + '</span>' +
+                    '<button class="play-btn" onclick="playFromSetlist(' + sl.id + ',' + i + ')"><span class="play-icon">&#9654;</span></button>';
+                if (t.cover) {
+                    html += '<img class="track-thumb" src="' + escHtml(t.cover) + '" alt="" loading="lazy">';
+                } else {
+                    html += '<div class="track-thumb no-thumb">&#9898;</div>';
+                }
+                html += '<div class="track-info">' +
+                    '<div class="track-title-line">' + escHtml(t.title) + '</div>' +
+                    '<div class="track-sub-line">' + escHtml(t.artist || '') + '</div>' +
+                    '</div>';
+                html += '<span class="track-badges">';
+                if (meta.bpm != null) html += '<span class="track-badge badge-bpm">' + meta.bpm + '</span>';
+                if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
+                if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
+                html += '</span>';
+                html += '<button class="meta-btn" onclick="reorderSetlistTrack(' + sl.id + ',' + i + ',-1)"' + (i === 0 ? ' disabled' : '') + ' title="Move up">&#9650;</button>';
+                html += '<button class="meta-btn" onclick="reorderSetlistTrack(' + sl.id + ',' + i + ',1)"' + (last ? ' disabled' : '') + ' title="Move down">&#9660;</button>';
+                html += '<button class="meta-btn" onclick="removeTrackFromSetlist(' + sl.id + ',' + i + ')" title="Remove">&times;</button>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+        html += '</div>';
+        document.getElementById('app').innerHTML = html;
+    });
+}
+
+function playSetlist(id) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl || !sl.tracks || sl.tracks.length === 0) return;
+        currentQueue = sl.tracks.map(function (t) {
+            return { youtubeId: t.youtubeId, title: t.title, artist: t.artist || '', cover: t.cover || '' };
+        });
+        currentIndex = 0;
+        loadFromQueue(0);
+    });
+}
+
+function playFromSetlist(id, idx) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl || !sl.tracks || sl.tracks.length === 0) return;
+        currentQueue = sl.tracks.map(function (t) {
+            return { youtubeId: t.youtubeId, title: t.title, artist: t.artist || '', cover: t.cover || '' };
+        });
+        currentIndex = idx;
+        loadFromQueue(idx);
+    });
+}
+
+// ------ Export ------
+
+function toggleExportMenu(id) {
+    var menu = document.getElementById('export-menu-' + id);
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+}
+
+function downloadBlob(filename, mime, content) {
+    var blob = new Blob([content], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 0);
+}
+
+function slugifySetlist(s) {
+    return (s || 'setlist').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'setlist';
+}
+
+function exportSetlistM3U(id) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        var lines = ['#EXTM3U'];
+        (sl.tracks || []).forEach(function (t) {
+            var label = (t.artist ? t.artist + ' - ' : '') + t.title;
+            lines.push('#EXTINF:-1,' + label);
+            lines.push('https://www.youtube.com/watch?v=' + t.youtubeId);
+        });
+        downloadBlob(slugifySetlist(sl.name) + '.m3u', 'audio/x-mpegurl', lines.join('\n') + '\n');
+    });
+}
+
+function exportSetlistTxt(id) {
+    dbGet('setlists', id).then(function (sl) {
+        if (!sl) return;
+        var lines = (sl.tracks || []).map(function (t, i) {
+            return (i + 1) + '. ' + (t.artist ? t.artist + ' - ' : '') + t.title;
+        });
+        downloadBlob(slugifySetlist(sl.name) + '.txt', 'text/plain', lines.join('\n') + '\n');
+    });
+}
+
+function exportSetlistCsv(id) {
+    Promise.all([dbGet('setlists', id), dbGetAll('track_meta')]).then(function (results) {
+        var sl = results[0];
+        if (!sl) return;
+        var metaById = {};
+        results[1].forEach(function (m) { metaById[m.id] = m; });
+        var lines = ['order,artist,title,release_id,youtube_id,youtube_url,bpm,key,rating'];
+        (sl.tracks || []).forEach(function (t, i) {
+            var m = metaById[t.metaId] || {};
+            lines.push([
+                i + 1,
+                _csvCell(t.artist || ''),
+                _csvCell(t.title || ''),
+                t.releaseId || '',
+                t.youtubeId,
+                'https://www.youtube.com/watch?v=' + t.youtubeId,
+                m.bpm != null ? m.bpm : '',
+                m.key || '',
+                m.rating || ''
+            ].join(','));
+        });
+        downloadBlob(slugifySetlist(sl.name) + '.csv', 'text/csv', lines.join('\n') + '\n');
+    });
+}
+
+function _csvCell(s) {
+    s = String(s == null ? '' : s);
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
 }
 
 // ============ YouTube Player ============
@@ -817,6 +1490,7 @@ function hideNowPlaying() {
     currentIndex = -1;
     sessionStorage.removeItem('playerState');
     highlightActiveTrack();
+    closeSuggestions();
 }
 
 function highlightActiveTrack() {
@@ -986,11 +1660,278 @@ function _restorePlayerState() {
     } catch (e) { console.warn('Failed to restore player state:', e); }
 }
 
+// ============ Track Metadata Editor ============
+
+function toggleTrackMetaEditor(metaId) {
+    var panel = document.getElementById('editor-' + metaId);
+    if (!panel) return;
+    if (panel.style.display === 'none') {
+        renderTrackMetaEditor(panel, metaId);
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
+}
+
+function renderTrackMetaEditor(panel, metaId) {
+    var idx = metaId.indexOf('_');
+    var releaseId = parseInt(metaId.substring(0, idx), 10);
+    var youtubeId = metaId.substring(idx + 1);
+    getTrackMeta(metaId).then(function (meta) {
+        meta = meta || {};
+        var camelots = [];
+        for (var n = 1; n <= 12; n++) { camelots.push(n + 'A'); camelots.push(n + 'B'); }
+        var keyOptions = '<option value="">&mdash;</option>';
+        for (var ki = 0; ki < camelots.length; ki++) {
+            var k = camelots[ki];
+            keyOptions += '<option value="' + k + '"' + (meta.key === k ? ' selected' : '') + '>' + k + '</option>';
+        }
+        var ratingOptions = '';
+        for (var rv = 0; rv <= 5; rv++) {
+            var label = rv === 0 ? '&mdash;' : ratingStars(rv);
+            ratingOptions += '<option value="' + rv + '"' + ((meta.rating || 0) === rv ? ' selected' : '') + '>' + label + '</option>';
+        }
+        var tagsStr = (meta.tags || []).join(', ');
+        var id = metaId;
+        panel.innerHTML =
+            '<div class="meta-grid">' +
+            '<label class="meta-field"><span>BPM</span><input type="number" step="0.1" min="40" max="220" id="mf-bpm-' + id + '" value="' + (meta.bpm != null ? meta.bpm : '') + '"></label>' +
+            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '">' + keyOptions + '</select></label>' +
+            '<label class="meta-field"><span>Rating</span><select id="mf-rating-' + id + '">' + ratingOptions + '</select></label>' +
+            '<label class="meta-field"><span>Energy 1-10</span><input type="number" min="1" max="10" id="mf-energy-' + id + '" value="' + (meta.energy != null ? meta.energy : '') + '"></label>' +
+            '<label class="meta-field"><span>Shelf</span><input type="text" id="mf-shelf-' + id + '" value="' + escHtml(meta.shelf || '') + '" placeholder="e.g. A3"></label>' +
+            '<label class="meta-field wide"><span>Tags (comma-separated)</span><input type="text" id="mf-tags-' + id + '" value="' + escHtml(tagsStr) + '" placeholder="peak, closer, floor filler"></label>' +
+            '<label class="meta-field wide"><span>Notes</span><textarea id="mf-notes-' + id + '" rows="2">' + escHtml(meta.notes || '') + '</textarea></label>' +
+            '<label class="meta-field checkbox"><input type="checkbox" id="mf-verified-' + id + '"' + (meta.verified ? ' checked' : '') + '> <span>YouTube link verified</span></label>' +
+            '</div>' +
+            '<div class="meta-actions">' +
+            '<button class="btn" onclick="toggleTrackMetaEditor(\'' + id + '\')">Cancel</button>' +
+            '<button class="btn btn-primary" onclick="saveTrackMetaFromForm(\'' + id + '\',' + releaseId + ',\'' + youtubeId + '\')">Save</button>' +
+            '</div>';
+    });
+}
+
+function saveTrackMetaFromForm(metaId, releaseId, youtubeId) {
+    var bpmRaw = document.getElementById('mf-bpm-' + metaId).value.trim();
+    var bpm = bpmRaw === '' ? null : parseFloat(bpmRaw);
+    var energyRaw = document.getElementById('mf-energy-' + metaId).value.trim();
+    var energy = energyRaw === '' ? null : parseInt(energyRaw, 10);
+    var rating = parseInt(document.getElementById('mf-rating-' + metaId).value, 10);
+    var tagsRaw = document.getElementById('mf-tags-' + metaId).value.trim();
+    var patch = {
+        release_id: releaseId,
+        youtube_id: youtubeId,
+        bpm: (bpm != null && isFinite(bpm)) ? bpm : null,
+        key: document.getElementById('mf-key-' + metaId).value || null,
+        rating: rating > 0 ? rating : null,
+        energy: (energy != null && isFinite(energy)) ? energy : null,
+        shelf: document.getElementById('mf-shelf-' + metaId).value.trim() || '',
+        tags: tagsRaw ? tagsRaw.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return !!t; }) : [],
+        notes: document.getElementById('mf-notes-' + metaId).value.trim() || '',
+        verified: document.getElementById('mf-verified-' + metaId).checked
+    };
+    saveTrackMeta(metaId, patch).then(function () {
+        renderCurrentView();
+    });
+}
+
 // ============ Utility ============
 
 function escHtml(str) {
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ============ Harmonic Suggestions ============
+
+var _suggestions = [];
+
+function parseCamelot(k) {
+    if (!k) return null;
+    var m = /^(\d{1,2})([AB])$/i.exec(String(k).trim());
+    if (!m) return null;
+    var n = parseInt(m[1], 10);
+    if (n < 1 || n > 12) return null;
+    return { n: n, letter: m[2].toUpperCase() };
+}
+
+function compatibleKeys(k) {
+    var p = parseCamelot(k);
+    if (!p) return [];
+    var next = (p.n % 12) + 1;
+    var prev = ((p.n - 2 + 12) % 12) + 1;
+    return [
+        p.n + p.letter,                                    // same key
+        next + p.letter,                                   // +1 on wheel
+        prev + p.letter,                                   // -1 on wheel
+        p.n + (p.letter === 'A' ? 'B' : 'A')               // relative major/minor
+    ];
+}
+
+function bpmDelta(a, b) {
+    if (!a || !b) return Infinity;
+    var d1 = Math.abs(a - b) / Math.min(a, b) * 100;
+    var d2 = Math.abs(a * 2 - b) / Math.min(a * 2, b) * 100;
+    var d3 = Math.abs(a - b * 2) / Math.min(a, b * 2) * 100;
+    return Math.min(d1, d2, d3);
+}
+
+function scoreCandidate(current, cand) {
+    var score = 0;
+    var keyMatched = false;
+    if (current.key && cand.key) {
+        var compat = compatibleKeys(current.key);
+        var idx = compat.indexOf(cand.key);
+        if (idx === 0) { score += 100; keyMatched = true; }
+        else if (idx > 0) { score += 70; keyMatched = true; }
+    }
+    if (!keyMatched && current.genres && cand.genres) {
+        var curGenres = current.genres.split(', ');
+        var hit = curGenres.some(function (g) { return g && cand.genres.indexOf(g) !== -1; });
+        if (hit) score += 40;
+    }
+    if (current.bpm && cand.bpm) {
+        var delta = bpmDelta(current.bpm, cand.bpm);
+        if (delta <= 6) score += Math.max(0, 100 - delta * 10);
+        else if (delta <= 12) score += Math.max(0, 50 - (delta - 6) * 3);
+    }
+    if (cand.rating) score += cand.rating * 2;
+    return score;
+}
+
+function openSuggestions() {
+    var existing = document.getElementById('suggestions-panel');
+    if (existing) { closeSuggestions(); return; }
+    if (currentIndex < 0 || !currentQueue[currentIndex]) return;
+
+    var cur = currentQueue[currentIndex];
+    Promise.all([
+        dbGetAll('videos'),
+        dbGetAll('releases'),
+        dbGetAll('track_meta')
+    ]).then(function (results) {
+        var videos = results[0];
+        var releases = results[1];
+        var metas = results[2];
+
+        var curVid = null;
+        for (var i = 0; i < videos.length; i++) {
+            if (videos[i].youtube_id === cur.youtubeId) { curVid = videos[i]; break; }
+        }
+        var relById = {};
+        releases.forEach(function (r) { relById[r.id] = r; });
+        var metaById = {};
+        metas.forEach(function (m) { metaById[m.id] = m; });
+
+        var curRel = curVid ? (relById[curVid.release_id] || null) : null;
+        var curMeta = curVid ? (metaById[curVid.release_id + '_' + curVid.youtube_id] || null) : null;
+        var ctx = {
+            bpm: curMeta ? curMeta.bpm : null,
+            key: curMeta ? curMeta.key : null,
+            genres: curRel ? curRel.genres : null
+        };
+
+        var queueYtSet = {};
+        currentQueue.forEach(function (t) { queueYtSet[t.youtubeId] = true; });
+
+        var cands = [];
+        videos.forEach(function (v) {
+            if (!v.youtube_id || queueYtSet[v.youtube_id]) return;
+            var r = relById[v.release_id] || {};
+            var m = metaById[v.release_id + '_' + v.youtube_id] || {};
+            var c = {
+                youtubeId: v.youtube_id,
+                title: v.title,
+                artist: r.artist || '',
+                cover: r.thumb_url || '',
+                releaseId: v.release_id,
+                releaseTitle: r.title || '',
+                bpm: m.bpm != null ? m.bpm : null,
+                key: m.key || null,
+                rating: m.rating || null,
+                genres: r.genres || ''
+            };
+            c.score = scoreCandidate(ctx, c);
+            if (c.score > 0) cands.push(c);
+        });
+        cands.sort(function (a, b) { return b.score - a.score; });
+        _suggestions = cands.slice(0, 20);
+        renderSuggestionsPanel(ctx, _suggestions);
+    });
+}
+
+function renderSuggestionsPanel(ctx, cands) {
+    var panel = document.createElement('div');
+    panel.id = 'suggestions-panel';
+    panel.className = 'suggestions-panel';
+
+    var metaBits = [];
+    if (ctx.bpm) metaBits.push(ctx.bpm + ' BPM');
+    if (ctx.key) metaBits.push('Key ' + ctx.key);
+    if (!ctx.bpm && !ctx.key) metaBits.push('no BPM/key &mdash; matching by genre');
+
+    var html = '<div class="suggestions-header">' +
+        '<span class="suggestions-title">Next up &mdash; harmonic matches</span>' +
+        '<button class="meta-btn" onclick="closeSuggestions()" title="Close">&times;</button>' +
+        '</div>';
+    html += '<div class="suggestions-sub">Current: ' + metaBits.join(' &middot; ') + '</div>';
+
+    if (cands.length === 0) {
+        html += '<div class="suggestions-empty">No matches. Tag more tracks with BPM/key in the metadata editor to get better suggestions.</div>';
+    } else {
+        html += '<div class="suggestions-list">';
+        cands.forEach(function (c, i) {
+            html += '<div class="suggestion-row">';
+            if (c.cover) html += '<img class="track-thumb" src="' + escHtml(c.cover) + '" alt="" loading="lazy">';
+            else html += '<div class="track-thumb no-thumb">&#9898;</div>';
+            html += '<div class="track-info">' +
+                '<div class="track-title-line">' + escHtml(c.title) + '</div>' +
+                '<div class="track-sub-line">' + escHtml(c.artist) + (c.releaseTitle ? ' &middot; ' + escHtml(c.releaseTitle) : '') + '</div>' +
+                '</div>';
+            html += '<span class="track-badges">';
+            if (c.bpm != null) html += '<span class="track-badge badge-bpm">' + c.bpm + '</span>';
+            if (c.key) html += '<span class="track-badge badge-key">' + escHtml(c.key) + '</span>';
+            if (c.rating) html += '<span class="track-badge badge-rating">' + ratingStars(c.rating) + '</span>';
+            html += '<span class="track-badge score-badge">' + Math.round(c.score) + '</span>';
+            html += '</span>';
+            html += '<div class="suggestion-actions">' +
+                '<button class="btn btn-primary" onclick="playNextSuggestion(' + i + ')">Play next</button>' +
+                '<button class="btn" onclick="addSuggestionToQueue(' + i + ')">Queue</button>' +
+                '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+    var btn = document.getElementById('np-suggest');
+    if (btn) btn.classList.add('active');
+}
+
+function closeSuggestions() {
+    var panel = document.getElementById('suggestions-panel');
+    if (panel) panel.remove();
+    var btn = document.getElementById('np-suggest');
+    if (btn) btn.classList.remove('active');
+}
+
+function playNextSuggestion(idx) {
+    var c = _suggestions[idx];
+    if (!c) return;
+    var item = { youtubeId: c.youtubeId, title: c.title, artist: c.artist, cover: c.cover };
+    currentQueue.splice(currentIndex + 1, 0, item);
+    currentIndex++;
+    loadFromQueue(currentIndex);
+    closeSuggestions();
+}
+
+function addSuggestionToQueue(idx) {
+    var c = _suggestions[idx];
+    if (!c) return;
+    currentQueue.push({ youtubeId: c.youtubeId, title: c.title, artist: c.artist, cover: c.cover });
+    _savePlayerState();
+    showSyncBanner('Queued: ' + c.title);
+    setTimeout(hideSyncBanner, 1200);
 }
 
 // ============ Init ============
@@ -1009,6 +1950,7 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('np-prev').addEventListener('click', function () {
         if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); }
     });
+    document.getElementById('np-suggest').addEventListener('click', openSuggestions);
 
     navigate('collection');
 });
