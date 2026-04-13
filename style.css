@@ -398,6 +398,97 @@ a:hover { color: var(--accent-hover); }
 .t-artist:hover, .t-release:hover { color: var(--accent); }
 .t-year { color: var(--text-dim); }
 
+/* ============ SETLISTS ============ */
+
+.setlist-index {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+}
+.setlist-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px 20px;
+    cursor: pointer; transition: all 0.2s;
+}
+.setlist-card:hover {
+    border-color: rgba(212, 160, 38, 0.5);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+.setlist-card-name {
+    font-family: var(--font-mono); font-size: 16px; font-weight: 700;
+    margin-bottom: 6px; color: var(--text);
+}
+.setlist-card-meta { font-size: 12px; color: var(--text-muted); }
+
+.setlist-detail { max-width: 1000px; }
+.setlist-header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+.setlist-name-input {
+    flex: 1; min-width: 240px;
+    background: transparent; border: 1px solid transparent;
+    border-radius: var(--radius-sm); padding: 8px 10px;
+    color: var(--text); font-family: var(--font-mono);
+    font-size: 24px; font-weight: 700; outline: none;
+    transition: all 0.2s;
+}
+.setlist-name-input:hover { border-color: var(--border); }
+.setlist-name-input:focus { border-color: var(--accent); background: var(--bg-card); }
+.setlist-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.setlist-export { position: relative; }
+.export-menu {
+    position: absolute; top: calc(100% + 4px); right: 0;
+    min-width: 200px; z-index: 120;
+}
+.btn-danger { border-color: rgba(192,57,43,0.4); color: var(--danger); }
+.btn-danger:hover { background: rgba(192,57,43,0.15); color: #ff6b5a; border-color: var(--danger); }
+
+.setlist-notes {
+    width: 100%; min-height: 60px; resize: vertical;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    color: var(--text); font-family: var(--font-body); font-size: 13px;
+    outline: none; transition: border-color 0.2s;
+    margin-bottom: 20px;
+}
+.setlist-notes:focus { border-color: var(--accent); }
+
+.setlist-num {
+    flex-shrink: 0; width: 28px; text-align: right;
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+}
+
+/* ============ POPOVERS ============ */
+
+.popover {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 6px;
+    min-width: 220px; max-width: 280px; z-index: 300;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.6);
+}
+.popover-title {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--text-dim); padding: 6px 10px 4px; font-weight: 600;
+}
+.popover-empty { font-size: 12px; color: var(--text-dim); padding: 8px 10px; }
+.popover-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px; font-size: 13px; color: var(--text);
+    border-radius: 3px; cursor: pointer; transition: background 0.15s;
+}
+.popover-item:hover { background: var(--bg-hover); color: var(--accent); }
+.popover-item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.popover-item-count {
+    font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+    background: var(--bg); padding: 1px 6px; border-radius: 8px;
+}
+.popover-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.popover-new { color: var(--accent); }
+
+.meta-btn.add-btn { font-size: 18px; font-weight: 700; }
+
 /* ============ TRACK METADATA ============ */
 
 .track-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin: 0 10px; }
