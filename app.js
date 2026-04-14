@@ -1094,16 +1094,64 @@ function removeTrackFromSetlist(id, idx) {
     });
 }
 
-function reorderSetlistTrack(id, idx, dir) {
+function moveSetlistTrack(id, fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
     dbGet('setlists', id).then(function (sl) {
         if (!sl) return;
-        var newIdx = idx + dir;
-        if (newIdx < 0 || newIdx >= sl.tracks.length) return;
-        var tmp = sl.tracks[idx];
-        sl.tracks[idx] = sl.tracks[newIdx];
-        sl.tracks[newIdx] = tmp;
+        var track = sl.tracks.splice(fromIdx, 1)[0];
+        sl.tracks.splice(toIdx, 0, track);
         sl.updated_at = new Date().toISOString();
         dbPut('setlists', sl).then(function () { renderSetlist(id); });
+    });
+}
+
+function initSetlistDragDrop(setlistId) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.setlist-tracklist .setlist-row'));
+    var dragSrcIdx = null;
+
+    function clearDragOver() {
+        rows.forEach(function (r) { r.classList.remove('drag-over-above', 'drag-over-below'); });
+    }
+
+    rows.forEach(function (row, idx) {
+        row.addEventListener('dragstart', function (e) {
+            dragSrcIdx = idx;
+            e.dataTransfer.effectAllowed = 'move';
+            setTimeout(function () { row.classList.add('dragging'); }, 0);
+        });
+
+        row.addEventListener('dragend', function () {
+            row.classList.remove('dragging');
+            clearDragOver();
+        });
+
+        row.addEventListener('dragover', function (e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            clearDragOver();
+            var rect = row.getBoundingClientRect();
+            if (e.clientY < rect.top + rect.height / 2) {
+                row.classList.add('drag-over-above');
+            } else {
+                row.classList.add('drag-over-below');
+            }
+        });
+
+        row.addEventListener('dragleave', function (e) {
+            if (!row.contains(e.relatedTarget)) {
+                row.classList.remove('drag-over-above', 'drag-over-below');
+            }
+        });
+
+        row.addEventListener('drop', function (e) {
+            e.preventDefault();
+            clearDragOver();
+            if (dragSrcIdx === null || dragSrcIdx === idx) return;
+            var rect = row.getBoundingClientRect();
+            var toIdx = (e.clientY < rect.top + rect.height / 2) ? idx : idx + 1;
+            if (dragSrcIdx < toIdx) toIdx--;
+            moveSetlistTrack(setlistId, dragSrcIdx, toIdx);
+        });
     });
 }
 
@@ -1324,8 +1372,8 @@ function renderSetlist(setlistId) {
             html += '<div class="video-list setlist-tracklist">';
             tracks.forEach(function (t, i) {
                 var meta = metaById[t.metaId] || {};
-                var last = i === tracks.length - 1;
-                html += '<div class="video-item setlist-row" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + (t.releaseId || '') + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
+                html += '<div class="video-item setlist-row" draggable="true" data-index="' + i + '" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + (t.releaseId || '') + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
+                    '<span class="drag-handle" title="Drag to reorder">&#8942;</span>' +
                     '<span class="setlist-num">' + (i + 1) + '</span>' +
                     '<button class="play-btn" onclick="playFromSetlist(' + sl.id + ',' + i + ')"><span class="play-icon">&#9654;</span></button>';
                 if (t.cover) {
@@ -1342,8 +1390,6 @@ function renderSetlist(setlistId) {
                 if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
                 if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                 html += '</span>';
-                html += '<button class="meta-btn" onclick="reorderSetlistTrack(' + sl.id + ',' + i + ',-1)"' + (i === 0 ? ' disabled' : '') + ' title="Move up">&#9650;</button>';
-                html += '<button class="meta-btn" onclick="reorderSetlistTrack(' + sl.id + ',' + i + ',1)"' + (last ? ' disabled' : '') + ' title="Move down">&#9660;</button>';
                 html += '<button class="meta-btn" onclick="removeTrackFromSetlist(' + sl.id + ',' + i + ')" title="Remove">&times;</button>';
                 html += '</div>';
             });
@@ -1351,6 +1397,7 @@ function renderSetlist(setlistId) {
         }
         html += '</div>';
         document.getElementById('app').innerHTML = html;
+        if (tracks.length > 0) initSetlistDragDrop(sl.id);
     });
 }
 
