@@ -1154,6 +1154,12 @@ function openAddToSetlistPopover(btn) {
         releaseId: parseInt(row.dataset.releaseId, 10) || null,
         metaId: row.dataset.metaId || null
     };
+    _openSetlistPopoverForTrack(btn, track);
+}
+
+// Opens the add-to-setlist popover for an arbitrary track object (not bound to a DOM row).
+// Used both by openAddToSetlistPopover (from track list rows) and by the now-playing + button.
+function _openSetlistPopoverForTrack(btn, track) {
     dbGetAll('setlists').then(function (setlists) {
         setlists.sort(function (a, b) { return (b.updated_at || '').localeCompare(a.updated_at || ''); });
         var pop = document.createElement('div');
@@ -1174,12 +1180,19 @@ function openAddToSetlistPopover(btn) {
         pop.innerHTML = html;
         document.body.appendChild(pop);
 
-        // Position near button
+        // Position near button — above if the button is in the lower half of the viewport
         var rect = btn.getBoundingClientRect();
-        pop.style.position = 'absolute';
-        pop.style.top = (rect.bottom + window.scrollY + 6) + 'px';
-        var left = rect.right + window.scrollX - 240;
+        pop.style.position = 'fixed';
+        if (rect.top > window.innerHeight / 2) {
+            pop.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+            pop.style.top = 'auto';
+        } else {
+            pop.style.top = (rect.bottom + 6) + 'px';
+            pop.style.bottom = 'auto';
+        }
+        var left = rect.right - 240;
         if (left < 8) left = 8;
+        if (left + 248 > window.innerWidth - 8) left = window.innerWidth - 256;
         pop.style.left = left + 'px';
 
         // Wire clicks
@@ -1203,6 +1216,34 @@ function openAddToSetlistPopover(btn) {
         setTimeout(function () {
             document.addEventListener('click', _popoverOutsideHandler);
         }, 0);
+    });
+}
+
+// + button on the now-playing bar: looks up releaseId/metaId via videos index then opens the setlist popover.
+function openNowPlayingAddToSetlist(btn) {
+    if (currentIndex < 0 || !currentQueue[currentIndex]) return;
+    closeAllPopovers();
+    var cur = currentQueue[currentIndex];
+    dbGetByIndex('videos', 'youtube_id', cur.youtubeId).then(function (vids) {
+        var vid = vids[0] || null;
+        var track = {
+            youtubeId: cur.youtubeId,
+            title: cur.title,
+            artist: cur.artist,
+            cover: cur.cover,
+            releaseId: vid ? vid.release_id : null,
+            metaId: vid ? (vid.release_id + '_' + vid.youtube_id) : null
+        };
+        _openSetlistPopoverForTrack(btn, track);
+    });
+}
+
+// ↗ button on the now-playing bar: looks up release_id from youtube_id and navigates to the release view.
+function gotoNowPlayingRelease() {
+    if (currentIndex < 0 || !currentQueue[currentIndex]) return;
+    var ytId = currentQueue[currentIndex].youtubeId;
+    dbGetByIndex('videos', 'youtube_id', ytId).then(function (vids) {
+        if (vids.length > 0) navigate('release', { releaseId: vids[0].release_id });
     });
 }
 
@@ -1491,6 +1532,7 @@ function hideNowPlaying() {
     sessionStorage.removeItem('playerState');
     highlightActiveTrack();
     closeSuggestions();
+    closeQueue();
 }
 
 function highlightActiveTrack() {
@@ -1620,6 +1662,7 @@ function shufflePlay() {
             });
             currentIndex = 0;
             loadFromQueue(0);
+            _renderQueuePanel();  // Auto-open queue so the shuffled list is immediately visible
         });
     });
 }
@@ -1930,8 +1973,127 @@ function addSuggestionToQueue(idx) {
     if (!c) return;
     currentQueue.push({ youtubeId: c.youtubeId, title: c.title, artist: c.artist, cover: c.cover });
     _savePlayerState();
+    if (document.getElementById('queue-panel')) _renderQueuePanel();
     showSyncBanner('Queued: ' + c.title);
     setTimeout(hideSyncBanner, 1200);
+}
+
+// ============ Queue Panel ============
+
+function openQueue() {
+    var existing = document.getElementById('queue-panel');
+    if (existing) { closeQueue(); return; }
+    if (currentQueue.length === 0) return;
+    _renderQueuePanel();
+}
+
+function closeQueue() {
+    var panel = document.getElementById('queue-panel');
+    if (panel) panel.remove();
+    var btn = document.getElementById('np-queue');
+    if (btn) btn.classList.remove('active');
+}
+
+function _renderQueuePanel() {
+    var existing = document.getElementById('queue-panel');
+    if (existing) existing.remove();
+
+    var panel = document.createElement('div');
+    panel.id = 'queue-panel';
+    panel.className = 'queue-panel';
+
+    var html = '<div class="queue-header">' +
+        '<span class="queue-title">&#9776; Queue &mdash; ' + currentQueue.length + ' track' + (currentQueue.length === 1 ? '' : 's') + '</span>' +
+        '<div class="queue-header-actions">' +
+        '<button class="btn" onclick="saveQueueAsSetlist()">Save as setlist</button>' +
+        '<button class="meta-btn" onclick="closeQueue()" title="Close">&times;</button>' +
+        '</div></div>';
+
+    html += '<div class="queue-list">';
+    currentQueue.forEach(function (item, i) {
+        var isCurrent = (i === currentIndex);
+        html += '<div class="queue-row' + (isCurrent ? ' queue-current' : '') + '">';
+        html += '<span class="queue-num">' + (i + 1) + '</span>';
+        if (item.cover) {
+            html += '<img class="track-thumb" src="' + escHtml(item.cover) + '" alt="" loading="lazy">';
+        } else {
+            html += '<div class="track-thumb no-thumb">&#9898;</div>';
+        }
+        html += '<div class="track-info">' +
+            '<div class="track-title-line">' + escHtml(item.title) + '</div>' +
+            '<div class="track-sub-line">' + escHtml(item.artist) + '</div>' +
+            '</div>';
+        html += '<div class="queue-actions">' +
+            '<button class="btn queue-play-btn" onclick="playFromQueuePanel(' + i + ')" title="Play from here">&#9654;</button>' +
+            '<button class="btn queue-remove-btn" onclick="removeFromQueuePanel(' + i + ')" title="Remove">&times;</button>' +
+            '</div>';
+        html += '</div>';
+    });
+    html += '</div>';
+
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+
+    var npBtn = document.getElementById('np-queue');
+    if (npBtn) npBtn.classList.add('active');
+
+    // Scroll current track into view
+    setTimeout(function () {
+        var cur = panel.querySelector('.queue-current');
+        if (cur) cur.scrollIntoView({ block: 'nearest' });
+    }, 50);
+}
+
+function playFromQueuePanel(idx) {
+    if (idx < 0 || idx >= currentQueue.length) return;
+    currentIndex = idx;
+    loadFromQueue(currentIndex);
+    _renderQueuePanel();
+}
+
+function removeFromQueuePanel(idx) {
+    if (idx < 0 || idx >= currentQueue.length) return;
+    currentQueue.splice(idx, 1);
+    if (currentIndex > idx) currentIndex--;
+    else if (currentIndex === idx && currentIndex >= currentQueue.length) currentIndex = Math.max(0, currentQueue.length - 1);
+    _savePlayerState();
+    if (currentQueue.length === 0) { closeQueue(); return; }
+    _renderQueuePanel();
+}
+
+function saveQueueAsSetlist() {
+    if (currentQueue.length === 0) return;
+    var name = prompt('Name for new setlist:');
+    if (!name || !name.trim()) return;
+    var now = new Date().toISOString();
+    var tracks = currentQueue.map(function (item) {
+        return {
+            youtubeId: item.youtubeId,
+            title: item.title,
+            artist: item.artist || '',
+            cover: item.cover || '',
+            releaseId: item.releaseId || null,
+            metaId: item.metaId || null
+        };
+    });
+    openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction('setlists', 'readwrite');
+            var req = tx.objectStore('setlists').add({
+                name: name.trim(),
+                created_at: now,
+                updated_at: now,
+                tracks: tracks,
+                notes: ''
+            });
+            req.onsuccess = function () { resolve(); };
+            req.onerror = function (e) { reject(e.target.error); };
+        });
+    }).then(function () {
+        closeQueue();
+        showSyncBanner('Saved \u201c' + name.trim() + '\u201d \u2014 ' + tracks.length + ' track' + (tracks.length === 1 ? '' : 's'));
+        setTimeout(hideSyncBanner, 2000);
+    });
 }
 
 // ============ Init ============
@@ -1951,6 +2113,11 @@ document.addEventListener('DOMContentLoaded', function () {
         if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); }
     });
     document.getElementById('np-suggest').addEventListener('click', openSuggestions);
+    document.getElementById('np-queue').addEventListener('click', openQueue);
+    document.getElementById('np-add-setlist').addEventListener('click', function () {
+        openNowPlayingAddToSetlist(this);
+    });
+    document.getElementById('np-goto-release').addEventListener('click', gotoNowPlayingRelease);
 
     navigate('collection');
 });
