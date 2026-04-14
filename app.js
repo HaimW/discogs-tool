@@ -275,14 +275,14 @@ async function syncCollection(config) {
     var realFolders = folders.filter(function (f) { return f.id !== 0; });
     var allReleases = {};
 
-    if (realFolders.length === 0) {
-        await fetchFolderReleases(config, 0, allReleases, null);
-    } else {
-        for (var fi = 0; fi < realFolders.length; fi++) {
-            showSyncBanner('Fetching folder: ' + realFolders[fi].name + '...');
-            await fetchFolderReleases(config, realFolders[fi].id, allReleases, realFolders[fi].id);
-        }
+    for (var fi = 0; fi < realFolders.length; fi++) {
+        showSyncBanner('Fetching folder: ' + realFolders[fi].name + '...');
+        await fetchFolderReleases(config, realFolders[fi].id, allReleases, realFolders[fi].id);
     }
+    // Always fetch folder 0 to pick up unfiled items. fetchFolderReleases
+    // skips releases already captured from a custom folder (if (!allReleases[rid])),
+    // so this only adds truly unfiled records.
+    await fetchFolderReleases(config, 0, allReleases, null);
 
     // Save releases to IndexedDB — preserve synced_at and video_count
     // from existing records so a re-sync doesn't wipe previous video data.
@@ -357,7 +357,7 @@ async function syncVideosInBackground(config) {
 
         // Re-render collection periodically so new video counts show up
         // while the user browses. Only if they're on the collection view.
-        if (done % rerenderEvery === 0 && _currentView !== 'setup' && _currentView !== 'release') {
+        if (done % rerenderEvery === 0 && _currentView === 'collection') {
             renderCollection();
         }
 
@@ -368,7 +368,7 @@ async function syncVideosInBackground(config) {
     }
 
     showSyncBanner('Sync complete!');
-    if (_currentView !== 'setup' && _currentView !== 'release') renderCollection();
+    if (_currentView === 'collection') renderCollection();
     setTimeout(function () { hideSyncBanner(); }, 2000);
     _syncRunning = false;
     document.getElementById('sync-btn').disabled = false;
@@ -431,10 +431,14 @@ function extractYoutubeId(uri) {
     try {
         var url = new URL(uri);
         if (url.hostname.indexOf('youtube.com') !== -1) {
-            return url.searchParams.get('v');
+            var v = url.searchParams.get('v');
+            if (v) return v;
+            // Handle /shorts/{id}, /embed/{id}, /live/{id}, /v/{id}
+            var m = url.pathname.match(/^\/(shorts|embed|live|v)\/([A-Za-z0-9_-]{11})/);
+            if (m) return m[2];
         }
         if (url.hostname.indexOf('youtu.be') !== -1) {
-            return url.pathname.slice(1);
+            return url.pathname.slice(1).split('?')[0] || null;
         }
     } catch (e) {}
     return null;
@@ -601,7 +605,7 @@ function renderCollection() {
             html += '<div class="genre-pills"><span class="filter-label">Genre:</span>';
             html += '<span class="genre-pill' + (!_filters.genre ? ' active' : '') + '" onclick="setFilter(\'genre\',\'\')">All</span>';
             genres.forEach(function (g) {
-                html += '<span class="genre-pill' + (_filters.genre === g ? ' active' : '') + '" onclick="setFilter(\'genre\',\'' + escHtml(g) + '\')">' + escHtml(g) + '</span>';
+                html += '<span class="genre-pill' + (_filters.genre === g ? ' active' : '') + '" onclick="setFilter(\'genre\',\'' + escJs(g) + '\')">' + escHtml(g) + '</span>';
             });
             html += '</div>';
         }
@@ -818,7 +822,7 @@ function renderTracks() {
             html += '<div class="genre-pills"><span class="filter-label">Tag:</span>';
             html += '<span class="genre-pill' + (!tf.tag ? ' active' : '') + '" onclick="tSetFilter(\'tag\',\'\')">All</span>';
             tagList.forEach(function (t) {
-                html += '<span class="genre-pill' + (tf.tag === t ? ' active' : '') + '" onclick="tSetFilter(\'tag\',\'' + escHtml(t) + '\')">' + escHtml(t) + '</span>';
+                html += '<span class="genre-pill' + (tf.tag === t ? ' active' : '') + '" onclick="tSetFilter(\'tag\',\'' + escJs(t) + '\')">' + escHtml(t) + '</span>';
             });
             html += '</div>';
         }
@@ -1287,11 +1291,16 @@ function openNowPlayingAddToSetlist(btn) {
     });
 }
 
-// ↗ button on the now-playing bar: looks up release_id from youtube_id and navigates to the release view.
+// ↗ button on the now-playing bar: navigates to the release for the current track.
 function gotoNowPlayingRelease() {
     if (currentIndex < 0 || !currentQueue[currentIndex]) return;
-    var ytId = currentQueue[currentIndex].youtubeId;
-    dbGetByIndex('videos', 'youtube_id', ytId).then(function (vids) {
+    var cur = currentQueue[currentIndex];
+    if (cur.releaseId) {
+        navigate('release', { releaseId: cur.releaseId });
+        return;
+    }
+    // Fallback for queue items persisted before releaseId was stored.
+    dbGetByIndex('videos', 'youtube_id', cur.youtubeId).then(function (vids) {
         if (vids.length > 0) navigate('release', { releaseId: vids[0].release_id });
     });
 }
@@ -1406,7 +1415,7 @@ function playSetlist(id) {
     dbGet('setlists', id).then(function (sl) {
         if (!sl || !sl.tracks || sl.tracks.length === 0) return;
         currentQueue = sl.tracks.map(function (t) {
-            return { youtubeId: t.youtubeId, title: t.title, artist: t.artist || '', cover: t.cover || '' };
+            return { youtubeId: t.youtubeId, releaseId: t.releaseId || null, title: t.title, artist: t.artist || '', cover: t.cover || '' };
         });
         currentIndex = 0;
         loadFromQueue(0);
@@ -1417,7 +1426,7 @@ function playFromSetlist(id, idx) {
     dbGet('setlists', id).then(function (sl) {
         if (!sl || !sl.tracks || sl.tracks.length === 0) return;
         currentQueue = sl.tracks.map(function (t) {
-            return { youtubeId: t.youtubeId, title: t.title, artist: t.artist || '', cover: t.cover || '' };
+            return { youtubeId: t.youtubeId, releaseId: t.releaseId || null, title: t.title, artist: t.artist || '', cover: t.cover || '' };
         });
         currentIndex = idx;
         loadFromQueue(idx);
@@ -1721,6 +1730,7 @@ function playTrack(element) {
     allItems.forEach(function (el, i) {
         currentQueue.push({
             youtubeId: el.dataset.youtubeId,
+            releaseId: el.dataset.releaseId || null,
             title: el.dataset.title,
             artist: el.dataset.artist || '',
             cover: el.dataset.cover || '',
@@ -1738,6 +1748,7 @@ function playAll() {
     allItems.forEach(function (el) {
         currentQueue.push({
             youtubeId: el.dataset.youtubeId,
+            releaseId: el.dataset.releaseId || null,
             title: el.dataset.title,
             artist: el.dataset.artist || '',
             cover: el.dataset.cover || '',
@@ -1943,6 +1954,12 @@ function escHtml(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Escape a value for use inside a single-quoted JS string in an inline handler.
+function escJs(str) {
+    if (!str) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 // ============ Harmonic Suggestions ============
 
 var _suggestions = [];
@@ -2017,7 +2034,10 @@ function openSuggestions() {
 
         var curVid = null;
         for (var i = 0; i < videos.length; i++) {
-            if (videos[i].youtube_id === cur.youtubeId) { curVid = videos[i]; break; }
+            if (videos[i].youtube_id === cur.youtubeId &&
+                    (!cur.releaseId || videos[i].release_id == cur.releaseId)) {
+                curVid = videos[i]; break;
+            }
         }
         var relById = {};
         releases.forEach(function (r) { relById[r.id] = r; });
@@ -2032,12 +2052,12 @@ function openSuggestions() {
             genres: curRel ? curRel.genres : null
         };
 
-        var queueYtSet = {};
-        currentQueue.forEach(function (t) { queueYtSet[t.youtubeId] = true; });
+        var queueSet = {};
+        currentQueue.forEach(function (t) { queueSet[(t.releaseId || '') + '_' + t.youtubeId] = true; });
 
         var cands = [];
         videos.forEach(function (v) {
-            if (!v.youtube_id || queueYtSet[v.youtube_id]) return;
+            if (!v.youtube_id || queueSet[(v.release_id || '') + '_' + v.youtube_id]) return;
             var r = relById[v.release_id] || {};
             var m = metaById[v.release_id + '_' + v.youtube_id] || {};
             var c = {
@@ -2129,7 +2149,7 @@ function playNextSuggestion(idx) {
 function addSuggestionToQueue(idx) {
     var c = _suggestions[idx];
     if (!c) return;
-    currentQueue.push({ youtubeId: c.youtubeId, title: c.title, artist: c.artist, cover: c.cover });
+    currentQueue.push({ youtubeId: c.youtubeId, releaseId: c.releaseId || null, title: c.title, artist: c.artist, cover: c.cover });
     _savePlayerState();
     if (document.getElementById('queue-panel')) _renderQueuePanel();
     showSyncBanner('Queued: ' + c.title);
