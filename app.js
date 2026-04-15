@@ -1637,6 +1637,16 @@ var currentIndex = -1;
 var isPlaying = false;
 var _saveInterval = null;
 
+// ---- Crossfade state ----
+var player2 = null;
+var player2Ready = false;
+var cfEnabled = false;
+var cfSeconds = 5;
+var _cfState = 'idle';        // 'idle' | 'preloaded' | 'fading' | 'switching'
+var _cfPreloadedIndex = -1;
+var _cfFadeInterval = null;
+var _cfCheckInterval = null;
+
 // Load YouTube IFrame API
 var ytTag = document.createElement('script');
 ytTag.src = 'https://www.youtube.com/iframe_api';
@@ -1655,10 +1665,23 @@ function onYouTubeIframeAPIReady() {
             onStateChange: onPlayerStateChange,
         },
     });
+    player2 = new YT.Player('player2-container', {
+        height: '1',
+        width: '1',
+        playerVars: { autoplay: 0, controls: 0, modestbranding: 1, rel: 0 },
+        events: {
+            onReady: function () { player2Ready = true; },
+            onStateChange: onPlayer2StateChange,
+        },
+    });
 }
 
 function onPlayerStateChange(event) {
     if (event.data === YT.PlayerState.ENDED) {
+        // Ignore ENDED while crossfade is actively fading or switching players
+        if (_cfState === 'fading' || _cfState === 'switching') return;
+        // Clean up unused preload if track ended before crossfade could start
+        if (_cfState === 'preloaded') _abortCrossfade();
         if (currentIndex < currentQueue.length - 1) {
             currentIndex++;
             loadFromQueue(currentIndex);
@@ -1668,6 +1691,18 @@ function onPlayerStateChange(event) {
             updatePlayPauseBtn();
         }
     } else if (event.data === YT.PlayerState.PLAYING) {
+        // Complete crossfade handoff: player1 is now playing the new track
+        if (_cfState === 'switching') {
+            player.setVolume(100);
+            try { player2.pauseVideo(); player2.setVolume(0); } catch (e) {}
+            _cfState = 'idle';
+            _cfPreloadedIndex = -1;
+            isPlaying = true;
+            updatePlayPauseBtn();
+            _savePlayerState();
+            if (cfEnabled) setTimeout(_preloadNextTrack, 800);
+            return;
+        }
         isPlaying = true;
         startViz();
         updatePlayPauseBtn();
@@ -1724,11 +1759,18 @@ function highlightActiveTrack() {
 function loadFromQueue(index) {
     var item = currentQueue[index];
     if (!item || !playerReady) return;
+    if (_cfState !== 'idle') _abortCrossfade();
+    player.setVolume(100);
     player.loadVideoById(item.youtubeId);
     showNowPlaying(item.title, item.artist, item.cover);
     isPlaying = true;
     updatePlayPauseBtn();
     _savePlayerState();
+    if (cfEnabled) {
+        _cfState = 'idle';
+        _cfPreloadedIndex = -1;
+        setTimeout(_preloadNextTrack, 800);
+    }
 }
 
 function playTrack(element) {
@@ -1859,6 +1901,134 @@ function shufflePlayAll() {
     shufflePlay(Infinity);
 }
 
+// ============ Crossfade ============
+
+function _loadCrossfadeSettings() {
+    Promise.all([
+        dbGet('config', 'crossfade_enabled'),
+        dbGet('config', 'crossfade_seconds')
+    ]).then(function (results) {
+        cfEnabled = results[0] ? results[0].value === true : false;
+        cfSeconds = results[1] ? (parseInt(results[1].value, 10) || 5) : 5;
+        _updateCfUI();
+        if (cfEnabled) _startCfCheckInterval();
+    });
+}
+
+function _saveCrossfadeSettings() {
+    dbPut('config', { key: 'crossfade_enabled', value: cfEnabled });
+    dbPut('config', { key: 'crossfade_seconds', value: cfSeconds });
+}
+
+function _updateCfUI() {
+    var btn = document.getElementById('np-cf-toggle');
+    var inp = document.getElementById('np-cf-seconds');
+    if (!btn || !inp) return;
+    btn.textContent = cfEnabled ? 'CF: ON' : 'CF: OFF';
+    if (cfEnabled) {
+        btn.classList.add('active');
+        inp.style.display = '';
+    } else {
+        btn.classList.remove('active');
+        inp.style.display = 'none';
+    }
+    inp.value = cfSeconds;
+}
+
+function _startCfCheckInterval() {
+    if (_cfCheckInterval) return;
+    _cfCheckInterval = setInterval(_checkCrossfade, 500);
+}
+
+function _stopCfCheckInterval() {
+    clearInterval(_cfCheckInterval);
+    _cfCheckInterval = null;
+}
+
+function _checkCrossfade() {
+    if (!cfEnabled || _cfState !== 'preloaded') return;
+    if (!playerReady || !player2Ready) return;
+    try {
+        var duration = player.getDuration();
+        var currentTime = player.getCurrentTime();
+        if (duration <= 0) return;
+        if (duration < cfSeconds + 2) return;
+        var timeLeft = duration - currentTime;
+        if (timeLeft > 0 && timeLeft <= cfSeconds) {
+            _startCrossfade();
+        }
+    } catch (e) {}
+}
+
+function _preloadNextTrack() {
+    var nextIndex = currentIndex + 1;
+    if (nextIndex >= currentQueue.length) {
+        _cfState = 'idle';
+        _cfPreloadedIndex = -1;
+        return;
+    }
+    if (!player2Ready) return;
+    var nextItem = currentQueue[nextIndex];
+    try {
+        player2.cueVideoById(nextItem.youtubeId);
+        _cfPreloadedIndex = nextIndex;
+        _cfState = 'preloaded';
+    } catch (e) {}
+}
+
+function _startCrossfade() {
+    _cfState = 'fading';
+    var startVol = 100;
+    try { startVol = player.getVolume(); } catch (e) {}
+    try {
+        player2.setVolume(0);
+        player2.playVideo();
+    } catch (e) { _abortCrossfade(); return; }
+    var steps = Math.ceil(cfSeconds * 1000 / 50);
+    var tick = 0;
+    _cfFadeInterval = setInterval(function () {
+        tick++;
+        var ratio = tick / steps;
+        var vol1 = Math.round(startVol * (1 - ratio));
+        var vol2 = Math.round(100 * ratio);
+        try { player.setVolume(vol1); } catch (e) {}
+        try { player2.setVolume(vol2); } catch (e) {}
+        if (tick >= steps) {
+            clearInterval(_cfFadeInterval);
+            _cfFadeInterval = null;
+            _completeCrossfade();
+        }
+    }, 50);
+}
+
+function _completeCrossfade() {
+    _cfState = 'switching';
+    var p2Time = 0;
+    try { p2Time = player2.getCurrentTime() || 0; } catch (e) {}
+    currentIndex = _cfPreloadedIndex;
+    var item = currentQueue[currentIndex];
+    showNowPlaying(item.title, item.artist, item.cover);
+    try {
+        player.setVolume(0);
+        player.loadVideoById({ videoId: item.youtubeId, startSeconds: p2Time });
+    } catch (e) {}
+    // Volume restore + player2 stop happen in onPlayerStateChange when player1 fires PLAYING
+}
+
+function _abortCrossfade() {
+    if (_cfFadeInterval) { clearInterval(_cfFadeInterval); _cfFadeInterval = null; }
+    try { player2.pauseVideo(); player2.setVolume(0); } catch (e) {}
+    try { player.setVolume(100); } catch (e) {}
+    _cfState = 'idle';
+    _cfPreloadedIndex = -1;
+}
+
+function onPlayer2StateChange(event) {
+    if (event.data === YT.PlayerState.ENDED && _cfState === 'fading') {
+        _abortCrossfade();
+    }
+}
+
 // ============ Player State Persistence ============
 
 function _savePlayerState() {
@@ -1892,6 +2062,7 @@ function _restorePlayerState() {
             isPlaying = false;
         }
         updatePlayPauseBtn();
+        if (cfEnabled && state.isPlaying) setTimeout(_preloadNextTrack, 1200);
     } catch (e) { console.warn('Failed to restore player state:', e); }
 }
 
@@ -2461,6 +2632,10 @@ function removeFromQueuePanel(idx) {
     if (currentIndex > idx) currentIndex--;
     else if (currentIndex === idx && currentIndex >= currentQueue.length) currentIndex = Math.max(0, currentQueue.length - 1);
     _savePlayerState();
+    if (cfEnabled && _cfState === 'preloaded') {
+        _abortCrossfade();
+        setTimeout(_preloadNextTrack, 200);
+    }
     if (currentQueue.length === 0) { closeQueue(); return; }
     _renderQueuePanel();
 }
@@ -2522,6 +2697,32 @@ document.addEventListener('DOMContentLoaded', function () {
         openNowPlayingAddToSetlist(this);
     });
     document.getElementById('np-goto-release').addEventListener('click', gotoNowPlayingRelease);
+
+    document.getElementById('np-cf-toggle').addEventListener('click', function () {
+        cfEnabled = !cfEnabled;
+        var secInput = document.getElementById('np-cf-seconds');
+        var newSec = parseInt(secInput.value, 10);
+        if (!isNaN(newSec) && newSec >= 1) cfSeconds = newSec;
+        _updateCfUI();
+        _saveCrossfadeSettings();
+        if (cfEnabled) {
+            _startCfCheckInterval();
+            if (isPlaying) _preloadNextTrack();
+        } else {
+            _stopCfCheckInterval();
+            if (_cfState !== 'idle') _abortCrossfade();
+        }
+    });
+
+    document.getElementById('np-cf-seconds').addEventListener('change', function () {
+        var v = parseInt(this.value, 10);
+        if (isNaN(v) || v < 1) { this.value = cfSeconds; return; }
+        if (v > 30) { this.value = 30; v = 30; }
+        cfSeconds = v;
+        _saveCrossfadeSettings();
+    });
+
+    _loadCrossfadeSettings();
 
     navigate('collection');
 });
