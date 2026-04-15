@@ -350,6 +350,19 @@ a:hover { color: var(--accent-hover); }
     font-size: 16px; font-weight: 700;
 }
 
+.np-cf-input {
+    width: 46px; height: 36px;
+    background: none; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text);
+    font-family: var(--font-mono); font-size: 12px;
+    text-align: center; padding: 0 4px; outline: none;
+    transition: border-color 0.2s;
+    -moz-appearance: textfield;
+}
+.np-cf-input::-webkit-outer-spin-button,
+.np-cf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.np-cf-input:focus { border-color: var(--accent); }
+
 /* ============ SUGGESTIONS PANEL ============ */
 
 .suggestions-panel {
@@ -728,5 +741,6 @@ a:hover { color: var(--accent-hover); }
     .release-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
     .now-playing { flex-wrap: wrap; padding: 10px 16px; gap: 10px; }
     .np-player { display: none; }
+    .np-cf-input { display: none !important; }
     .release-title { font-size: 22px; }
 }

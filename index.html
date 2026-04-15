@@ -48,12 +48,15 @@
         </div>
         <div class="np-player">
             <div id="player-container"></div>
+            <div id="player2-container" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
         </div>
         <div class="np-controls">
             <button id="np-queue" class="np-btn np-btn-suggest" title="View queue">&#9776; Queue</button>
             <button id="np-add-setlist" class="np-btn np-btn-suggest" title="Add current track to setlist">+</button>
             <button id="np-goto-release" class="np-btn np-btn-icon" title="Go to release">&#8599;</button>
             <button id="np-suggest" class="np-btn np-btn-suggest" title="Suggest next track (harmonic match)">Suggest</button>
+            <button id="np-cf-toggle" class="np-btn np-btn-suggest" title="Toggle crossfade">CF: OFF</button>
+            <input id="np-cf-seconds" class="np-cf-input" type="number" min="1" max="30" value="5" title="Crossfade duration (seconds)" style="display:none;">
             <button id="np-prev" class="np-btn" title="Previous">&#9664;&#9664;</button>
             <button id="np-play-pause" class="np-btn np-btn-main" title="Play/Pause">&#9654;</button>
             <button id="np-next" class="np-btn" title="Next">&#9654;&#9654;</button>
