@@ -279,10 +279,11 @@ async function syncCollection(config) {
         showSyncBanner('Fetching folder: ' + realFolders[fi].name + '...');
         await fetchFolderReleases(config, realFolders[fi].id, allReleases, realFolders[fi].id);
     }
-    // Always fetch folder 0 to pick up unfiled items. fetchFolderReleases
-    // skips releases already captured from a custom folder (if (!allReleases[rid])),
-    // so this only adds truly unfiled records.
-    await fetchFolderReleases(config, 0, allReleases, null);
+    // Catch-up pass against folder 0 ("All") to pick up unfiled releases.
+    // skipDuplicates=true prevents the quantity++ branch from firing for
+    // releases already captured from a custom folder — folder 0 returns
+    // the entire collection, so without this every quantity would inflate by 1.
+    await fetchFolderReleases(config, 0, allReleases, null, true);
 
     // Save releases to IndexedDB — preserve synced_at and video_count
     // from existing records so a re-sync doesn't wipe previous video data.
@@ -381,7 +382,7 @@ function formatEta(seconds) {
     return m + 'm ' + s + 's';
 }
 
-async function fetchFolderReleases(config, folderId, allReleases, tagFolderId) {
+async function fetchFolderReleases(config, folderId, allReleases, tagFolderId, skipDuplicates) {
     var page = 1;
     while (true) {
         var path = '/users/' + config.username + '/collection/folders/' + folderId + '/releases?per_page=100&page=' + page;
@@ -409,7 +410,7 @@ async function fetchFolderReleases(config, folderId, allReleases, tagFolderId) {
                     video_count: 0,
                     folder_ids: []
                 };
-            } else {
+            } else if (!skipDuplicates) {
                 allReleases[rid].quantity++;
             }
             if (tagFolderId && allReleases[rid].folder_ids.indexOf(tagFolderId) === -1) {
