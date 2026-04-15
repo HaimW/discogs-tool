@@ -1664,14 +1664,17 @@ function onPlayerStateChange(event) {
             loadFromQueue(currentIndex);
         } else {
             isPlaying = false;
+            stopViz();
             updatePlayPauseBtn();
         }
     } else if (event.data === YT.PlayerState.PLAYING) {
         isPlaying = true;
+        startViz();
         updatePlayPauseBtn();
         _savePlayerState();
     } else if (event.data === YT.PlayerState.PAUSED) {
         isPlaying = false;
+        stopViz();
         updatePlayPauseBtn();
         _savePlayerState();
     }
@@ -1695,6 +1698,7 @@ function showNowPlaying(title, artist, coverUrl) {
 }
 
 function hideNowPlaying() {
+    stopViz();
     document.getElementById('now-playing').style.display = 'none';
     document.body.style.paddingBottom = '0';
     if (player && playerReady) player.stopVideo();
@@ -1889,6 +1893,209 @@ function _restorePlayerState() {
         }
         updatePlayPauseBtn();
     } catch (e) { console.warn('Failed to restore player state:', e); }
+}
+
+// ============ Music Visualizer ============
+
+var vizCanvas = null;
+var vizCtx = null;
+var vizAnimFrame = null;
+var vizType = 'bars';
+var vizTime = 0;
+var vizParticles = [];
+var vizActive = false;
+
+function initViz() {
+    vizCanvas = document.getElementById('viz-canvas');
+    if (!vizCanvas) return;
+    vizCtx = vizCanvas.getContext('2d');
+    vizParticles = [];
+    for (var i = 0; i < 180; i++) {
+        vizParticles.push(_newParticle(vizCanvas.width, vizCanvas.height));
+    }
+    document.querySelectorAll('.viz-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            vizType = this.dataset.viz;
+            document.querySelectorAll('.viz-btn').forEach(function (b) { b.classList.remove('active'); });
+            this.classList.add('active');
+        });
+    });
+}
+
+function _newParticle(w, h) {
+    var angle = Math.random() * Math.PI * 2;
+    var speed = 0.3 + Math.random() * 1.2;
+    return {
+        x: w / 2, y: h / 2,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: Math.random(),
+        maxLife: 0.4 + Math.random() * 0.6,
+        hue: Math.floor(Math.random() * 360),
+        size: 1 + Math.random() * 2,
+    };
+}
+
+function startViz() {
+    if (vizActive) return;
+    if (!vizCanvas) initViz();
+    if (!vizCanvas) return;
+    vizActive = true;
+    _vizLoop();
+}
+
+function stopViz() {
+    vizActive = false;
+    if (vizAnimFrame) { cancelAnimationFrame(vizAnimFrame); vizAnimFrame = null; }
+    if (vizCtx && vizCanvas) vizCtx.clearRect(0, 0, vizCanvas.width, vizCanvas.height);
+}
+
+function _vizLoop() {
+    if (!vizActive) return;
+    vizTime += 0.016;
+    // Natural beat pulse: ~2 Hz sine gives a 120-BPM-equivalent pulsing feel
+    var vizBeat = 0.5 + 0.5 * Math.sin(vizTime * 2.0 * Math.PI);
+    var w = vizCanvas.width;
+    var h = vizCanvas.height;
+
+    if (vizType === 'bars')      { _drawBars(w, h, vizBeat); }
+    else if (vizType === 'wave') { _drawWave(w, h, vizBeat); }
+    else if (vizType === 'particles') { _drawParticles(w, h, vizBeat); }
+    else if (vizType === 'rings') { _drawRings(w, h, vizBeat); }
+
+    vizAnimFrame = requestAnimationFrame(_vizLoop);
+}
+
+// VIZ 1 — Neon Spectrum Bars
+function _drawBars(w, h, beat) {
+    var ctx = vizCtx;
+    // Fade trail
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(0, 0, w, h);
+
+    var numBars = 36;
+    var gap = 2;
+    var barW = (w - (numBars - 1) * gap) / numBars;
+    var centerY = h / 2;
+
+    for (var i = 0; i < numBars; i++) {
+        var t = i / numBars;
+        // Three overlapping sines per bar give a spectrum-like variation
+        var v1 = Math.sin(vizTime * 1.7 + i * 0.45) * 0.5 + 0.5;
+        var v2 = Math.sin(vizTime * 3.1 + i * 0.72) * 0.3;
+        var v3 = Math.sin(vizTime * 0.9 + i * 1.1) * 0.2;
+        var barH = Math.max(3, (v1 + v2 + v3) * centerY * 0.82 * (0.7 + beat * 0.6));
+
+        var hue = 180 + t * 120; // cyan (180) → magenta (300)
+        var x = i * (barW + gap);
+
+        ctx.save();
+        ctx.shadowBlur = 14;
+        ctx.shadowColor = 'hsl(' + hue + ',100%,70%)';
+        ctx.fillStyle = 'hsl(' + hue + ',100%,62%)';
+        ctx.fillRect(x, centerY - barH, barW, barH);
+        // Dimmer reflection below
+        ctx.fillStyle = 'hsl(' + hue + ',100%,38%)';
+        ctx.fillRect(x, centerY, barW, barH * 0.55);
+        ctx.restore();
+    }
+}
+
+// VIZ 2 — Plasma Sine Waves
+function _drawWave(w, h, beat) {
+    var ctx = vizCtx;
+    ctx.clearRect(0, 0, w, h);
+    var ampScale = h * 0.35 * (0.7 + beat * 0.6);
+    var waves = [
+        { amp: 0.9, freq: 2.1, speed: 0.9,  phase: 0,           hue: 190, alpha: 0.9, lw: 2.5 },
+        { amp: 0.6, freq: 3.5, speed: 1.4,  phase: Math.PI / 3,  hue: 280, alpha: 0.7, lw: 1.8 },
+        { amp: 0.7, freq: 1.8, speed: 0.6,  phase: Math.PI,      hue: 140, alpha: 0.65, lw: 2.0 },
+    ];
+    waves.forEach(function (wave) {
+        ctx.save();
+        ctx.beginPath();
+        for (var x = 0; x <= w; x += 2) {
+            var xn = x / w;
+            var y = h / 2 + Math.sin(xn * wave.freq * Math.PI * 2 + vizTime * wave.speed + wave.phase) * ampScale * wave.amp;
+            if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = 'hsla(' + wave.hue + ',100%,65%,' + wave.alpha + ')';
+        ctx.lineWidth = wave.lw;
+        ctx.shadowBlur = 18;
+        ctx.shadowColor = 'hsl(' + wave.hue + ',100%,70%)';
+        ctx.stroke();
+        ctx.restore();
+    });
+}
+
+// VIZ 3 — Starfield Particles
+function _drawParticles(w, h, beat) {
+    var ctx = vizCtx;
+    // Dark fade trail
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, 0, w, h);
+
+    var speedMult = 1 + beat * 2.5;
+    for (var i = 0; i < vizParticles.length; i++) {
+        var p = vizParticles[i];
+        p.x += p.vx * speedMult;
+        p.y += p.vy * speedMult;
+        p.life += 0.013;
+        if (p.life > p.maxLife || p.x < 0 || p.x > w || p.y < 0 || p.y > h) {
+            vizParticles[i] = _newParticle(w, h);
+            continue;
+        }
+        var alpha = Math.max(0, 1 - p.life / p.maxLife);
+        ctx.save();
+        ctx.shadowBlur = 8 + beat * 10;
+        ctx.shadowColor = 'hsl(' + p.hue + ',100%,70%)';
+        ctx.fillStyle = 'hsla(' + p.hue + ',100%,70%,' + alpha + ')';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * (0.8 + beat * 0.5), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+// VIZ 4 — Pulse Rings
+function _drawRings(w, h, beat) {
+    var ctx = vizCtx;
+    ctx.clearRect(0, 0, w, h);
+    var cx = w / 2, cy = h / 2;
+    var maxR = Math.min(w, h) * 0.44;
+    var numRings = 6;
+
+    for (var i = 0; i < numRings; i++) {
+        var t = ((vizTime * 0.12 + i / numRings) % 1);
+        var r = t * maxR * (1 + beat * 0.35);
+        var hue = (vizTime * 35 + i * 55) % 360;
+        var alpha = (1 - t) * 0.92;
+        var lw = 1.5 + (1 - t) * 4.5;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, Math.max(1, r), 0, Math.PI * 2);
+        ctx.strokeStyle = 'hsla(' + hue + ',100%,65%,' + alpha + ')';
+        ctx.lineWidth = lw;
+        ctx.shadowBlur = 22 + beat * 18;
+        ctx.shadowColor = 'hsl(' + hue + ',100%,70%)';
+        ctx.stroke();
+        ctx.restore();
+    }
+    // Central glowing dot
+    var innerR = 6 + beat * 18;
+    var grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerR + 4);
+    grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+    grd.addColorStop(0.5, 'rgba(0,229,255,0.6)');
+    grd.addColorStop(1, 'rgba(0,229,255,0)');
+    ctx.save();
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = '#00e5ff';
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+    ctx.restore();
 }
 
 // ============ Track Metadata Editor ============
