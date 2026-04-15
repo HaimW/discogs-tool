@@ -585,7 +585,7 @@ function renderCollection() {
                 '<span class="stat-count">' + filtered.length + ' releases</span>' +
                 '<div class="shuffle-controls">' +
                 '<input type="number" id="shuffle-count" class="shuffle-count-input" value="50" min="1" max="9999" title="Number of tracks to shuffle">' +
-                '<button class="btn btn-shuffle" onclick="shufflePlay()">U+1F500; Shuffle Play</button>' +
+                '<button class="btn btn-shuffle" onclick="shufflePlay()">🔀 Shuffle Play</button>' +
                 '<button class="btn btn-shuffle-all" onclick="shufflePlayAll()">&#8734; Shuffle All</button>' +
                 '</div>' +
                 '</div>' +
