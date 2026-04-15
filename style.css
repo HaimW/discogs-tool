@@ -99,9 +99,26 @@ a:hover { color: var(--accent-hover); }
     background: none; border: 1px solid var(--accent); color: var(--accent);
     padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer;
     font-size: 13px; font-family: var(--font-body); transition: all 0.2s;
-    margin-left: 12px;
 }
 .btn-shuffle:hover { background: var(--accent); color: #000; }
+.shuffle-controls {
+    display: inline-flex; align-items: center; gap: 6px; margin-left: 12px;
+}
+.shuffle-count-input {
+    width: 54px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 5px 8px; color: var(--text);
+    font-family: var(--font-mono); font-size: 12px; outline: none;
+    text-align: center; -moz-appearance: textfield;
+}
+.shuffle-count-input::-webkit-outer-spin-button,
+.shuffle-count-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.shuffle-count-input:focus { border-color: var(--accent); }
+.btn-shuffle-all {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    padding: 6px 14px; border-radius: var(--radius-sm); cursor: pointer;
+    font-size: 13px; font-family: var(--font-body); transition: all 0.2s;
+}
+.btn-shuffle-all:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ============ SYNC BANNER ============ */
 

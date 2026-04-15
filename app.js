@@ -583,7 +583,11 @@ function renderCollection() {
         html += '<div class="collection-header"><div class="collection-stats">' +
                 '<h1>Your Collection</h1>' +
                 '<span class="stat-count">' + filtered.length + ' releases</span>' +
+                '<div class="shuffle-controls">' +
+                '<input type="number" id="shuffle-count" class="shuffle-count-input" value="50" min="1" max="9999" title="Number of tracks to shuffle">' +
                 '<button class="btn btn-shuffle" onclick="shufflePlay()">&#9840; Shuffle Play</button>' +
+                '<button class="btn btn-shuffle-all" onclick="shufflePlayAll()">&#8734; Shuffle All</button>' +
+                '</div>' +
                 '</div>' +
                 '<div class="search-bar">' +
                 '<input type="text" class="search-input" id="search-input" placeholder="Search artist or title..." value="' + escHtml(_filters.q) + '" onkeydown="if(event.key===\'Enter\')doSearch()">' +
@@ -1778,7 +1782,7 @@ function playAllFromRelease(releaseId) {
     });
 }
 
-function shufflePlay() {
+function shufflePlay(limitOverride) {
     if (!playerReady) return;
     dbGetAll('releases').then(function (allReleases) {
         // Apply current filters
@@ -1819,8 +1823,18 @@ function shufflePlay() {
                 matchingVideos[j] = tmp;
             }
 
-            // Take first 50
-            var selected = matchingVideos.slice(0, 50);
+            // Determine limit
+            var limit;
+            if (typeof limitOverride === 'number') {
+                limit = limitOverride;
+            } else {
+                var inputEl = document.getElementById('shuffle-count');
+                var parsed = inputEl ? parseInt(inputEl.value, 10) : NaN;
+                limit = (!isNaN(parsed) && parsed >= 1) ? parsed : 50;
+            }
+            var selected = (limit === Infinity || limit >= matchingVideos.length)
+                ? matchingVideos
+                : matchingVideos.slice(0, limit);
             currentQueue = selected.map(function (v) {
                 var r = relMap[v.release_id] || {};
                 return {
@@ -1835,6 +1849,10 @@ function shufflePlay() {
             _renderQueuePanel();  // Auto-open queue so the shuffled list is immediately visible
         });
     });
+}
+
+function shufflePlayAll() {
+    shufflePlay(Infinity);
 }
 
 // ============ Player State Persistence ============
