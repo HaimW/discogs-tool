@@ -302,6 +302,27 @@ async function syncCollection(config) {
         }
         await dbPut('releases', newRel);
     }
+
+    // Remove releases that are no longer in the Discogs collection.
+    var existingReleases = await dbGetAll('releases');
+    for (var ei = 0; ei < existingReleases.length; ei++) {
+        var eid = existingReleases[ei].id;
+        if (!allReleases[eid]) {
+            await dbDelete('releases', eid);
+            var staleVideos = await dbGetByIndex('videos', 'release_id', eid);
+            for (var vi2 = 0; vi2 < staleVideos.length; vi2++) {
+                await dbDelete('videos', staleVideos[vi2].id);
+            }
+            var staleTracks = await dbGetByIndex('tracklist', 'release_id', eid);
+            for (var ti2 = 0; ti2 < staleTracks.length; ti2++) {
+                await dbDelete('tracklist', staleTracks[ti2].id);
+            }
+            var staleMeta = await dbGetByIndex('track_meta', 'release_id', eid);
+            for (var mi = 0; mi < staleMeta.length; mi++) {
+                await dbDelete('track_meta', staleMeta[mi].id);
+            }
+        }
+    }
 }
 
 // Phase 2 runs in the background so the user can browse the collection
