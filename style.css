@@ -836,3 +836,136 @@ a:hover { color: var(--accent-hover); }
     .np-actions { gap: 2px; }
     .np-transport { padding: 0 10px; gap: 8px; }
 }
+
+/* ============ WANT LIST ============ */
+
+.wl-header-actions {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+
+/* Stats bar */
+.wl-stats-bar {
+    display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: flex-start;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 18px; margin-bottom: 18px;
+}
+.wl-stat-group {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+}
+.wl-stat-chip {
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 20px;
+    font-size: 12px; color: var(--text-muted); background: none;
+    white-space: nowrap; cursor: pointer; transition: all 0.2s;
+}
+.wl-stat-chip:hover, .wl-stat-chip.active {
+    border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+}
+.wl-not-owned {
+    border-color: var(--info); color: var(--info);
+}
+.wl-not-owned:hover { background: rgba(41,128,185,0.1); }
+.wl-dd-btn {
+    border-color: var(--text-dim);
+}
+
+/* Decade pills */
+.decade-pill {
+    padding: 4px 12px; border: 1px solid var(--border); border-radius: 20px;
+    font-size: 12px; color: var(--text-muted); white-space: nowrap;
+    cursor: pointer; background: none; transition: all 0.2s;
+}
+.decade-pill:hover, .decade-pill.active {
+    border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+}
+
+/* Small count inside pills */
+.pill-count {
+    display: inline-block; font-size: 10px; color: var(--text-dim);
+    margin-left: 2px;
+}
+.genre-pill.active .pill-count,
+.decade-pill.active .pill-count,
+.wl-stat-chip.active .pill-count { color: inherit; }
+
+/* Want card overrides */
+.wl-card { cursor: default; }
+.wl-card:hover { transform: translateY(-2px); }
+
+/* Badges specific to want list */
+.badge-owned {
+    top: 8px; left: 8px;
+    background: rgba(41,128,185,0.85); color: #fff;
+}
+.badge-wl-rating {
+    top: 8px; right: 8px;
+    background: rgba(0,0,0,0.75); color: var(--accent);
+    font-size: 9px; letter-spacing: 1px;
+    backdrop-filter: blur(4px);
+}
+
+/* Notes line */
+.wl-notes {
+    font-size: 11px; color: var(--text-dim); margin-top: 4px;
+    line-height: 1.4; font-style: italic;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+
+/* Card action buttons */
+.wl-card-actions {
+    display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px;
+}
+.btn-sm {
+    padding: 4px 9px; font-size: 11px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--text-muted); cursor: pointer; transition: all 0.2s;
+    text-decoration: none; display: inline-flex; align-items: center;
+    font-family: var(--font-body);
+}
+.btn-sm:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+.btn-sm.btn-primary {
+    background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600;
+}
+.btn-sm.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-sm.btn-danger { border-color: var(--text-dim); }
+.btn-sm.btn-danger:hover { border-color: var(--danger); color: var(--danger); background: rgba(192,57,43,0.1); }
+
+/* Price panel */
+.wl-price-panel {
+    border-top: 1px solid var(--border);
+    background: var(--bg-surface);
+    padding: 10px 12px;
+}
+.wl-price-loading, .wl-price-empty {
+    font-size: 12px; color: var(--text-dim); padding: 4px 0;
+}
+.wl-price-table { display: flex; flex-direction: column; gap: 4px; }
+.wl-price-header {
+    font-size: 11px; font-weight: 600; color: var(--accent);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;
+}
+.wl-price-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; gap: 8px;
+}
+.wl-price-cond { color: var(--text-muted); }
+.wl-price-val {
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-weight: 600;
+}
+
+/* Dig Deeper panel */
+.wl-dig-deeper {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px 24px; margin-bottom: 20px;
+}
+.wl-dd-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+}
+.wl-dd-header h3 { font-family: var(--font-mono); font-size: 16px; }
+.wl-dd-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+.wl-dd-section { margin-bottom: 16px; }
+.wl-dd-section h4 {
+    font-size: 12px; font-weight: 600; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+}
