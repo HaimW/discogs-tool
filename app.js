@@ -6,7 +6,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 5;
+var DB_VERSION = 6;
 var _db = null;
 
 function openDB() {
@@ -48,6 +48,11 @@ function openDB() {
             if (!db.objectStoreNames.contains('tracklist')) {
                 var tl = db.createObjectStore('tracklist', { keyPath: 'id' });
                 tl.createIndex('release_id', 'release_id');
+            }
+            if (!db.objectStoreNames.contains('wants')) {
+                var ws = db.createObjectStore('wants', { keyPath: 'id' });
+                ws.createIndex('date_added', 'date_added');
+                ws.createIndex('artist', 'artist');
             }
         };
         req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
@@ -491,7 +496,8 @@ var _currentView = '';
 var _filters = {
     q: '', genre: '', folder: '', sort: 'artist', page: 1,
     tracks: { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 },
-    setlistId: null
+    setlistId: null,
+    wantlist: { q: '', genre: '', format: '', decade: '', sort: 'artist', page: 1 }
 };
 
 function navigate(view, params) {
@@ -512,6 +518,7 @@ function renderCurrentView() {
             case 'setup': renderSetup(); break;
             case 'release': renderRelease(_filters.releaseId); break;
             case 'tracks': renderTracks(); break;
+            case 'wantlist': renderWantList(); break;
             case 'setlists': renderSetlists(); break;
             case 'setlist': renderSetlist(_filters.setlistId); break;
             case 'backup': renderBackup(); break;
@@ -723,6 +730,695 @@ function renderCollection() {
         }
 
         document.getElementById('app').innerHTML = html;
+    });
+}
+
+// ============ Want List Sync ============
+
+var _wantSyncRunning = false;
+
+function startWantListSync() {
+    if (_wantSyncRunning) return;
+    getConfig().then(function (config) {
+        if (!config.token || !config.username) { navigate('setup'); return; }
+        _wantSyncRunning = true;
+        var btn = document.getElementById('wl-sync-btn');
+        if (btn) btn.disabled = true;
+        showSyncBanner('Syncing want list...');
+        syncWantList(config).then(function () {
+            navigate('wantlist');
+            showSyncBanner('Want list ready — fetching videos in background...');
+            syncWantListVideosInBackground(config).catch(function (err) {
+                showSyncBanner('Want list video sync failed: ' + err.message);
+                console.error(err);
+                _wantSyncRunning = false;
+                var btn2 = document.getElementById('wl-sync-btn');
+                if (btn2) btn2.disabled = false;
+            });
+        }).catch(function (err) {
+            showSyncBanner('Want list sync failed: ' + err.message);
+            console.error(err);
+            _wantSyncRunning = false;
+            var btn2 = document.getElementById('wl-sync-btn');
+            if (btn2) btn2.disabled = false;
+        });
+    });
+}
+
+async function syncWantList(config) {
+    var page = 1;
+    var allWants = {};
+    while (true) {
+        var path = '/users/' + config.username + '/wants?per_page=100&page=' + page;
+        var data = await discogsGet(path, config);
+        var items = data.wants || [];
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+            var info = item.basic_information || {};
+            var rid = info.id;
+            if (!rid) continue;
+            var existing = await dbGet('wants', rid);
+            allWants[rid] = {
+                id: rid,
+                title: info.title || 'Unknown',
+                artist: (info.artists || []).map(function (a) { return a.name; }).join(', ') || 'Unknown',
+                year: info.year || null,
+                genres: (info.genres || []).join(', ') || null,
+                styles: (info.styles || []).join(', ') || null,
+                formats: (info.formats || []).map(function (f) { return f.name; }).join(', ') || null,
+                labels: (info.labels || []).map(function (l) { return l.name; }).join(', ') || null,
+                thumb_url: info.thumb || null,
+                cover_url: info.cover_image || null,
+                notes: item.notes || '',
+                rating: item.rating || 0,
+                date_added: item.date_added || null,
+                video_count: existing ? (existing.video_count || 0) : 0,
+                synced_at: existing ? (existing.synced_at || null) : null
+            };
+        }
+        var pagination = data.pagination || {};
+        var totalPages = pagination.pages || 1;
+        showSyncBanner('Want list: page ' + page + '/' + totalPages);
+        if (page >= totalPages) break;
+        page++;
+        await sleep(1000);
+    }
+
+    var ids = Object.keys(allWants);
+    for (var ri = 0; ri < ids.length; ri++) {
+        await dbPut('wants', allWants[ids[ri]]);
+    }
+
+    var existingWants = await dbGetAll('wants');
+    for (var ei = 0; ei < existingWants.length; ei++) {
+        if (!allWants[existingWants[ei].id]) {
+            await dbDelete('wants', existingWants[ei].id);
+        }
+    }
+}
+
+async function syncWantListVideosInBackground(config) {
+    var wants = await dbGetAll('wants');
+    var unsynced = wants.filter(function (w) { return !w.synced_at; });
+    var total = unsynced.length;
+    if (total === 0) {
+        hideSyncBanner();
+        _wantSyncRunning = false;
+        var btn = document.getElementById('wl-sync-btn');
+        if (btn) btn.disabled = false;
+        return;
+    }
+
+    var startTime = Date.now();
+    for (var vi = 0; vi < unsynced.length; vi++) {
+        var want = unsynced[vi];
+        var done = vi + 1;
+        var elapsed = (Date.now() - startTime) / 1000;
+        var avg = done > 1 ? elapsed / (done - 1) : 1.2;
+        var remaining = Math.max(0, Math.round(avg * (total - done)));
+        showSyncBanner('Want list videos: ' + done + '/' + total +
+            ' (ETA ' + formatEta(remaining) + ') — ' + want.artist + ' — ' + want.title);
+        try {
+            var data = await discogsGet('/releases/' + want.id, config);
+            var videos = data.videos || [];
+            var vidCount = 0;
+            for (var v = 0; v < videos.length; v++) {
+                var vid = videos[v];
+                if (!vid.embed) continue;
+                var uri = vid.uri || '';
+                if (uri.indexOf('youtube.com') === -1 && uri.indexOf('youtu.be') === -1) continue;
+                var ytId = extractYoutubeId(uri);
+                if (!ytId) continue;
+                await dbPut('videos', {
+                    id: want.id + '_' + ytId,
+                    release_id: want.id,
+                    title: vid.title || 'Untitled',
+                    uri: uri,
+                    youtube_id: ytId,
+                    duration: vid.duration || null,
+                    position: v + 1
+                });
+                vidCount++;
+            }
+            want.video_count = vidCount;
+            want.synced_at = new Date().toISOString();
+            await dbPut('wants', want);
+        } catch (err) {
+            console.error('Error fetching want release ' + want.id + ':', err);
+        }
+        if (done % 5 === 0 && _currentView === 'wantlist') renderWantList();
+        if (vi < unsynced.length - 1) await sleep(1100);
+    }
+
+    showSyncBanner('Want list sync complete!');
+    if (_currentView === 'wantlist') renderWantList();
+    setTimeout(function () { hideSyncBanner(); }, 2000);
+    _wantSyncRunning = false;
+    var btn = document.getElementById('wl-sync-btn');
+    if (btn) btn.disabled = false;
+}
+
+// ============ Want List View ============
+
+function renderWantList() {
+    Promise.all([
+        dbGetAll('wants'),
+        dbGetAll('releases'),
+        dbGetAll('videos')
+    ]).then(function (results) {
+        var allWants = results[0];
+        var allCollectionReleases = results[1];
+        var allVideos = results[2];
+
+        // Build collection IDs set for cross-reference
+        var collectionIds = {};
+        allCollectionReleases.forEach(function (r) { collectionIds[r.id] = true; });
+
+        // Accurate video counts from video records
+        var videoCounts = {};
+        allVideos.forEach(function (v) {
+            videoCounts[v.release_id] = (videoCounts[v.release_id] || 0) + 1;
+        });
+        allWants.forEach(function (w) { w.video_count = videoCounts[w.id] || 0; });
+
+        var wf = _filters.wantlist;
+
+        // Filter
+        var filtered = allWants;
+        var q = (wf.q || '').toLowerCase();
+        if (q) {
+            filtered = filtered.filter(function (w) {
+                return w.artist.toLowerCase().indexOf(q) !== -1 ||
+                       w.title.toLowerCase().indexOf(q) !== -1;
+            });
+        }
+        if (wf.genre) {
+            filtered = filtered.filter(function (w) {
+                return w.genres && w.genres.indexOf(wf.genre) !== -1;
+            });
+        }
+        if (wf.format) {
+            filtered = filtered.filter(function (w) {
+                return w.formats && w.formats.indexOf(wf.format) !== -1;
+            });
+        }
+        if (wf.decade) {
+            var decadeStart = parseInt(wf.decade, 10);
+            filtered = filtered.filter(function (w) {
+                return w.year && w.year >= decadeStart && w.year < decadeStart + 10;
+            });
+        }
+
+        // Sort
+        var sortKey = wf.sort || 'artist';
+        filtered.sort(function (a, b) {
+            switch (sortKey) {
+                case 'title':      return (a.title || '').localeCompare(b.title || '');
+                case 'year':       return (b.year || 0) - (a.year || 0);
+                case 'date_added': return (b.date_added || '').localeCompare(a.date_added || '');
+                case 'rating':     return (b.rating || 0) - (a.rating || 0);
+                default:           return (a.artist || '').localeCompare(b.artist || '');
+            }
+        });
+
+        // Paginate
+        var perPage = 48;
+        var page = wf.page || 1;
+        var totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+        if (page > totalPages) page = totalPages;
+        var start = (page - 1) * perPage;
+        var pageWants = filtered.slice(start, start + perPage);
+
+        // Stats
+        var decadeCounts = {};
+        var genreCounts = {};
+        var formatCounts = {};
+        var notInCollection = 0;
+        var genreSet = {};
+        var formatSet = {};
+        allWants.forEach(function (w) {
+            if (w.year) {
+                var dec = Math.floor(w.year / 10) * 10;
+                decadeCounts[dec] = (decadeCounts[dec] || 0) + 1;
+            }
+            if (w.genres) w.genres.split(', ').forEach(function (g) {
+                if (g) { genreCounts[g] = (genreCounts[g] || 0) + 1; genreSet[g] = true; }
+            });
+            if (w.formats) w.formats.split(', ').forEach(function (f) {
+                if (f) { formatCounts[f] = (formatCounts[f] || 0) + 1; formatSet[f] = true; }
+            });
+            if (!collectionIds[w.id]) notInCollection++;
+        });
+
+        var topGenres = Object.keys(genreCounts).sort(function (a, b) {
+            return genreCounts[b] - genreCounts[a];
+        }).slice(0, 5);
+
+        var genres = Object.keys(genreSet).sort();
+        var formats = Object.keys(formatSet).sort();
+        var decadesSorted = Object.keys(decadeCounts).map(Number).sort(function (a, b) { return a - b; });
+
+        // ---- Build HTML ----
+        var html = '';
+
+        // Header
+        html += '<div class="collection-header">';
+        html += '<div class="collection-stats">';
+        html += '<h1>Want List</h1>';
+        html += '<span class="stat-count">' + allWants.length + ' wants';
+        if (filtered.length !== allWants.length) html += ' &nbsp;(' + filtered.length + ' shown)';
+        html += '</span>';
+        html += '<div class="shuffle-controls">';
+        html += '<input type="number" id="wl-shuffle-count" class="shuffle-count-input" value="50" min="1" max="9999" title="Number of tracks to shuffle">';
+        html += '<button class="btn btn-shuffle" onclick="wlShufflePlay()">🔀 Shuffle Wants</button>';
+        html += '<button class="btn btn-shuffle-all" onclick="wlShufflePlayAll()">∞ Shuffle All</button>';
+        html += '</div>';
+        html += '</div>';
+        html += '<div class="wl-header-actions">';
+        html += '<button class="btn btn-primary" id="wl-sync-btn" onclick="startWantListSync()"' + (_wantSyncRunning ? ' disabled' : '') + '>';
+        html += '<span class="sync-icon">↻</span> Sync Want List</button>';
+        html += '<button class="btn" onclick="exportWantListCSV()" title="Export as CSV">↓ CSV</button>';
+        html += '</div>';
+        html += '</div>';
+
+        // Search bar
+        html += '<div class="search-bar" style="margin-bottom:16px;">';
+        html += '<input type="text" class="search-input" id="wl-search-input" placeholder="Search artist or title..." value="' + escHtml(wf.q) + '" onkeydown="if(event.key===\'Enter\')wlDoSearch()">';
+        html += '<button class="btn btn-search" onclick="wlDoSearch()">Search</button>';
+        if (wf.q) html += '<button class="btn btn-clear" onclick="wlClearSearch()">Clear</button>';
+        html += '</div>';
+
+        // Stats bar
+        html += '<div class="wl-stats-bar">';
+
+        // Decade filter pills inside stats bar
+        if (decadesSorted.length > 0) {
+            html += '<div class="wl-stat-group"><span class="filter-label">Decade:</span>';
+            html += '<span class="decade-pill' + (!wf.decade ? ' active' : '') + '" onclick="wlSetFilter(\'decade\',\'\')">All</span>';
+            decadesSorted.forEach(function (d) {
+                html += '<span class="decade-pill' + (String(wf.decade) === String(d) ? ' active' : '') + '" onclick="wlSetFilter(\'decade\',' + d + ')">' +
+                    d + 's <span class="pill-count">' + decadeCounts[d] + '</span></span>';
+            });
+            html += '</div>';
+        }
+
+        // Top genres as clickable chips
+        if (topGenres.length > 0) {
+            html += '<div class="wl-stat-group"><span class="filter-label">Top genres:</span>';
+            topGenres.forEach(function (g) {
+                html += '<span class="wl-stat-chip' + (wf.genre === g ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' +
+                    escHtml(g) + ' <span class="pill-count">' + genreCounts[g] + '</span></span>';
+            });
+            html += '</div>';
+        }
+
+        // Collection cross-ref + dig deeper
+        html += '<div class="wl-stat-group">';
+        html += '<span class="wl-stat-chip wl-not-owned">' + notInCollection + ' not in collection</span>';
+        if (allWants.length > 0) {
+            html += '<span class="wl-stat-chip wl-dd-btn" onclick="wlDigDeeper()">🔍 Dig Deeper</span>';
+        }
+        html += '</div>';
+
+        html += '</div>'; // .wl-stats-bar
+
+        // Dig deeper panel (populated by wlDigDeeper())
+        html += '<div id="wl-dig-deeper-panel" style="display:none;"></div>';
+
+        // Genre filter pills
+        if (genres.length > 0) {
+            html += '<div class="genre-pills"><span class="filter-label">Genre:</span>';
+            html += '<span class="genre-pill' + (!wf.genre ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'\')">All</span>';
+            genres.forEach(function (g) {
+                html += '<span class="genre-pill' + (wf.genre === g ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' + escHtml(g) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Format filter pills
+        if (formats.length > 0) {
+            html += '<div class="genre-pills"><span class="filter-label">Format:</span>';
+            html += '<span class="genre-pill' + (!wf.format ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'\')">All</span>';
+            formats.forEach(function (f) {
+                html += '<span class="genre-pill' + (wf.format === f ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'' + escJs(f) + '\')">' + escHtml(f) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Sort bar
+        html += '<div class="sort-bar"><span class="sort-label">Sort by:</span>';
+        [['artist', 'Artist'], ['title', 'Title'], ['year', 'Year'], ['date_added', 'Date Added'], ['rating', 'Rating']].forEach(function (pair) {
+            html += '<span class="sort-option' + (sortKey === pair[0] ? ' active' : '') + '" onclick="wlSetSort(\'' + pair[0] + '\')">' + pair[1] + '</span>';
+        });
+        html += '</div>';
+
+        // Grid / empty states
+        if (allWants.length === 0) {
+            html += '<div class="empty-state"><div class="vinyl-icon-huge">&#9898;</div>' +
+                '<p class="empty-title">Your want list is empty</p>' +
+                '<p class="empty-subtitle">Sync your Discogs want list to see it here</p>' +
+                '<button class="btn btn-primary btn-large" onclick="startWantListSync()"><span class="sync-icon">&#8635;</span> Sync Want List</button></div>';
+        } else if (filtered.length === 0) {
+            html += '<div class="empty-state"><p class="empty-title">No wants match.</p>' +
+                '<button class="btn btn-primary" onclick="wlClearFilters()">Clear filters</button></div>';
+        } else {
+            html += '<div class="release-grid wl-grid">';
+            pageWants.forEach(function (w) {
+                var vc = w.video_count || 0;
+                var inCollection = !!collectionIds[w.id];
+                html += '<div class="release-card wl-card">';
+                html += '<div class="card-cover">';
+                if (w.cover_url) {
+                    html += '<img src="' + escHtml(w.cover_url) + '" alt="' + escHtml(w.artist) + '" loading="lazy">';
+                } else {
+                    html += '<div class="no-cover"><span class="vinyl-icon-large">&#9898;</span></div>';
+                }
+                if (vc > 0) {
+                    html += '<span class="badge badge-videos">' + vc + ' video' + (vc !== 1 ? 's' : '') + '</span>';
+                }
+                if (inCollection) {
+                    html += '<span class="badge badge-owned">Owned</span>';
+                }
+                if (w.rating) {
+                    html += '<span class="badge badge-wl-rating">' + ratingStars(w.rating) + '</span>';
+                }
+                html += '</div>';
+
+                html += '<div class="card-info">';
+                html += '<div class="card-artist">' + escHtml(w.artist) + '</div>';
+                html += '<div class="card-title">' + escHtml(w.title) + '</div>';
+                html += '<div class="card-meta">';
+                if (w.year) html += '<span>' + w.year + '</span>';
+                if (w.formats) html += '<span class="card-format">' + escHtml(w.formats) + '</span>';
+                html += '</div>';
+                if (w.notes) {
+                    html += '<div class="wl-notes" title="' + escHtml(w.notes) + '">' +
+                        escHtml(w.notes.length > 70 ? w.notes.slice(0, 70) + '…' : w.notes) + '</div>';
+                }
+                html += '<div class="wl-card-actions">';
+                if (vc > 0) {
+                    html += '<button class="btn btn-sm btn-primary" onclick="wlPlayRelease(' + w.id + ')" title="Play videos">&#9654;</button>';
+                }
+                html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + w.id + '" target="_blank" rel="noopener" title="View on Discogs">&#8599;</a>';
+                html += '<button class="btn btn-sm" onclick="wlOpenPricePanel(' + w.id + ', this)" title="Price suggestions">$</button>';
+                html += '<button class="btn btn-sm btn-danger" onclick="wlRemove(' + w.id + ',\'' + escJs(w.artist) + '\',\'' + escJs(w.title) + '\')" title="Remove from want list">&times;</button>';
+                html += '</div>';
+                html += '</div>';
+
+                html += '<div class="wl-price-panel" id="wl-price-' + w.id + '" style="display:none;"></div>';
+                html += '</div>';
+            });
+            html += '</div>';
+
+            // Pagination
+            if (totalPages > 1) {
+                html += '<div class="pagination">';
+                if (page > 1) html += '<span class="page-link" onclick="wlGoPage(' + (page - 1) + ')">&laquo; Prev</span>';
+                for (var p = 1; p <= totalPages; p++) {
+                    if (p === page) {
+                        html += '<span class="page-link active">' + p + '</span>';
+                    } else if (p <= 3 || p > totalPages - 3 || (p >= page - 2 && p <= page + 2)) {
+                        html += '<span class="page-link" onclick="wlGoPage(' + p + ')">' + p + '</span>';
+                    } else if (p === 4 || p === totalPages - 3) {
+                        html += '<span class="page-dots">...</span>';
+                    }
+                }
+                if (page < totalPages) html += '<span class="page-link" onclick="wlGoPage(' + (page + 1) + ')">Next &raquo;</span>';
+                html += '</div>';
+            }
+        }
+
+        document.getElementById('app').innerHTML = html;
+    });
+}
+
+// ============ Want List Filter Helpers ============
+
+function wlDoSearch() {
+    var el = document.getElementById('wl-search-input');
+    _filters.wantlist.q = el ? el.value.trim() : '';
+    _filters.wantlist.page = 1;
+    renderWantList();
+}
+function wlClearSearch() { _filters.wantlist.q = ''; _filters.wantlist.page = 1; renderWantList(); }
+function wlSetFilter(k, v) { _filters.wantlist[k] = v; _filters.wantlist.page = 1; renderWantList(); }
+function wlSetSort(s) { _filters.wantlist.sort = s; renderWantList(); }
+function wlGoPage(p) { _filters.wantlist.page = p; renderWantList(); window.scrollTo(0, 0); }
+function wlClearFilters() {
+    _filters.wantlist = { q: '', genre: '', format: '', decade: '', sort: 'artist', page: 1 };
+    renderWantList();
+}
+
+// ============ Want List Player ============
+
+function wlPlayRelease(releaseId) {
+    if (!playerReady) return;
+    dbGetByIndex('videos', 'release_id', releaseId).then(function (videos) {
+        if (!videos || videos.length === 0) {
+            alert('No videos found for this release. Try syncing the want list first.');
+            return;
+        }
+        return dbGet('wants', releaseId).then(function (w) {
+            videos.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+            currentQueue = videos.map(function (v) {
+                return {
+                    youtubeId: v.youtube_id,
+                    title: v.title,
+                    releaseId: releaseId,
+                    artist: w ? w.artist : '',
+                    cover: w ? (w.thumb_url || '') : ''
+                };
+            });
+            currentIndex = 0;
+            loadFromQueue(0);
+        });
+    });
+}
+
+function wlShufflePlay(limitOverride) {
+    if (!playerReady) return;
+    dbGetAll('wants').then(function (allWants) {
+        var wf = _filters.wantlist;
+        var filtered = allWants;
+        var q = (wf.q || '').toLowerCase();
+        if (q) filtered = filtered.filter(function (w) {
+            return w.artist.toLowerCase().indexOf(q) !== -1 || w.title.toLowerCase().indexOf(q) !== -1;
+        });
+        if (wf.genre) filtered = filtered.filter(function (w) {
+            return w.genres && w.genres.indexOf(wf.genre) !== -1;
+        });
+        if (wf.format) filtered = filtered.filter(function (w) {
+            return w.formats && w.formats.indexOf(wf.format) !== -1;
+        });
+        if (wf.decade) {
+            var ds = parseInt(wf.decade, 10);
+            filtered = filtered.filter(function (w) { return w.year && w.year >= ds && w.year < ds + 10; });
+        }
+
+        var ids = filtered.map(function (w) { return w.id; });
+        if (ids.length === 0) { alert('No wants match the current filters.'); return; }
+
+        dbGetAll('videos').then(function (allVideos) {
+            var matchingVideos = allVideos.filter(function (v) {
+                return v.youtube_id && ids.indexOf(v.release_id) !== -1;
+            });
+            if (matchingVideos.length === 0) {
+                alert('No videos found for your want list. Sync the want list first to fetch them.');
+                return;
+            }
+
+            for (var i = matchingVideos.length - 1; i > 0; i--) {
+                var j = Math.floor(Math.random() * (i + 1));
+                var tmp = matchingVideos[i];
+                matchingVideos[i] = matchingVideos[j];
+                matchingVideos[j] = tmp;
+            }
+
+            var limit;
+            if (typeof limitOverride === 'number') {
+                limit = limitOverride;
+            } else {
+                var inputEl = document.getElementById('wl-shuffle-count');
+                var parsed = inputEl ? parseInt(inputEl.value, 10) : NaN;
+                limit = (!isNaN(parsed) && parsed >= 1) ? parsed : 50;
+            }
+            var selected = (limit === Infinity || limit >= matchingVideos.length)
+                ? matchingVideos
+                : matchingVideos.slice(0, limit);
+
+            var wantMap = {};
+            filtered.forEach(function (w) { wantMap[w.id] = w; });
+
+            currentQueue = selected.map(function (v) {
+                var w = wantMap[v.release_id] || {};
+                return {
+                    youtubeId: v.youtube_id,
+                    title: v.title,
+                    releaseId: v.release_id,
+                    artist: w.artist || '',
+                    cover: w.thumb_url || ''
+                };
+            });
+            currentIndex = 0;
+            loadFromQueue(0);
+            _renderQueuePanel();
+        });
+    });
+}
+
+function wlShufflePlayAll() { wlShufflePlay(Infinity); }
+
+// ============ Want List Actions ============
+
+function wlRemove(releaseId, artist, title) {
+    if (!confirm('Remove “' + artist + ' — ' + title + '” from your Discogs want list?')) return;
+    getConfig().then(function (config) {
+        fetch('https://api.discogs.com/users/' + config.username + '/wants/' + releaseId, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': 'Discogs token=' + config.token,
+                'User-Agent': 'VinylCollectionPlayer/2.0'
+            }
+        }).then(function (r) {
+            if (r.ok || r.status === 204) {
+                return dbDelete('wants', releaseId).then(function () {
+                    showSyncBanner('Removed from want list');
+                    setTimeout(hideSyncBanner, 2000);
+                    renderWantList();
+                });
+            } else {
+                alert('Failed to remove from Discogs (HTTP ' + r.status + ')');
+            }
+        }).catch(function (err) {
+            alert('Error: ' + err.message);
+        });
+    });
+}
+
+function wlOpenPricePanel(releaseId, btn) {
+    var panel = document.getElementById('wl-price-' + releaseId);
+    if (!panel) return;
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    panel.innerHTML = '<div class="wl-price-loading">Loading prices…</div>';
+    panel.style.display = 'block';
+    getConfig().then(function (config) {
+        discogsGet('/marketplace/price_suggestions/' + releaseId, config).then(function (data) {
+            var conditions = [
+                'Mint (M)', 'Near Mint (NM or M-)', 'Very Good Plus (VG+)',
+                'Very Good (VG)', 'Good Plus (G+)', 'Good (G)', 'Fair (F)', 'Poor (P)'
+            ];
+            var html = '<div class="wl-price-table">';
+            html += '<div class="wl-price-header">Price Suggestions</div>';
+            var hasData = false;
+            conditions.forEach(function (cond) {
+                var entry = data[cond];
+                if (!entry || !entry.value) return;
+                hasData = true;
+                html += '<div class="wl-price-row">';
+                html += '<span class="wl-price-cond">' + escHtml(cond.split('(')[0].trim()) + '</span>';
+                html += '<span class="wl-price-val">' + escHtml(entry.currency || '') + ' ' + Number(entry.value).toFixed(2) + '</span>';
+                html += '</div>';
+            });
+            if (!hasData) html += '<div class="wl-price-empty">No price data available.</div>';
+            html += '</div>';
+            panel.innerHTML = html;
+        }).catch(function () {
+            panel.innerHTML = '<div class="wl-price-empty">Could not load prices.</div>';
+        });
+    });
+}
+
+function exportWantListCSV() {
+    dbGetAll('wants').then(function (wants) {
+        var lines = ['Artist,Title,Year,Formats,Genres,Styles,Labels,Notes,Rating,Date Added'];
+        wants.forEach(function (w) {
+            lines.push([
+                _csvCell(w.artist), _csvCell(w.title), _csvCell(w.year || ''),
+                _csvCell(w.formats || ''), _csvCell(w.genres || ''), _csvCell(w.styles || ''),
+                _csvCell(w.labels || ''), _csvCell(w.notes || ''),
+                _csvCell(w.rating || ''), _csvCell(w.date_added || '')
+            ].join(','));
+        });
+        downloadBlob('want-list.csv', 'text/csv', lines.join('\n') + '\n');
+    });
+}
+
+function wlDigDeeper() {
+    var panel = document.getElementById('wl-dig-deeper-panel');
+    if (!panel) return;
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    panel.innerHTML = '<div class="wl-price-loading">Analysing…</div>';
+    panel.style.display = 'block';
+
+    Promise.all([dbGetAll('wants'), dbGetAll('releases')]).then(function (results) {
+        var wants = results[0];
+        var collection = results[1];
+
+        var collGenres = {};
+        var collStyles = {};
+        var collArtists = {};
+        collection.forEach(function (r) {
+            if (r.genres) r.genres.split(', ').forEach(function (g) { if (g) collGenres[g] = true; });
+            if (r.styles) r.styles.split(', ').forEach(function (s) { if (s) collStyles[s] = true; });
+            if (r.artist) r.artist.split(', ').forEach(function (a) { a = a.trim(); if (a) collArtists[a] = true; });
+        });
+
+        var newGenreCounts = {};
+        var newStyleCounts = {};
+        var newArtistCounts = {};
+        wants.forEach(function (w) {
+            if (w.genres) w.genres.split(', ').forEach(function (g) {
+                if (g && !collGenres[g]) newGenreCounts[g] = (newGenreCounts[g] || 0) + 1;
+            });
+            if (w.styles) w.styles.split(', ').forEach(function (s) {
+                if (s && !collStyles[s]) newStyleCounts[s] = (newStyleCounts[s] || 0) + 1;
+            });
+            if (w.artist) w.artist.split(', ').forEach(function (a) {
+                a = a.trim();
+                if (a && !collArtists[a]) newArtistCounts[a] = (newArtistCounts[a] || 0) + 1;
+            });
+        });
+
+        var topNewGenres  = Object.keys(newGenreCounts).sort(function (a, b) { return newGenreCounts[b]  - newGenreCounts[a];  }).slice(0, 10);
+        var topNewStyles  = Object.keys(newStyleCounts).sort(function (a, b) { return newStyleCounts[b]  - newStyleCounts[a];  }).slice(0, 10);
+        var topNewArtists = Object.keys(newArtistCounts).sort(function (a, b) { return newArtistCounts[b] - newArtistCounts[a]; }).slice(0, 10);
+
+        var html = '<div class="wl-dig-deeper">';
+        html += '<div class="wl-dd-header"><h3>🔍 Dig Deeper — Gaps in Your Collection</h3>';
+        html += '<button class="btn btn-clear" onclick="document.getElementById(\'wl-dig-deeper-panel\').style.display=\'none\'">Close</button></div>';
+        html += '<p class="wl-dd-subtitle">Genres, styles, and artists from your want list not yet represented in your collection:</p>';
+
+        if (topNewGenres.length > 0) {
+            html += '<div class="wl-dd-section"><h4>New Genres</h4><div class="genre-pills">';
+            topNewGenres.forEach(function (g) {
+                html += '<span class="genre-pill" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' +
+                    escHtml(g) + ' <span class="pill-count">' + newGenreCounts[g] + '</span></span>';
+            });
+            html += '</div></div>';
+        }
+
+        if (topNewStyles.length > 0) {
+            html += '<div class="wl-dd-section"><h4>New Styles</h4><div class="genre-pills">';
+            topNewStyles.forEach(function (s) {
+                html += '<span class="genre-pill">' + escHtml(s) + ' <span class="pill-count">' + newStyleCounts[s] + '</span></span>';
+            });
+            html += '</div></div>';
+        }
+
+        if (topNewArtists.length > 0) {
+            html += '<div class="wl-dd-section"><h4>New Artists</h4><div class="genre-pills">';
+            topNewArtists.forEach(function (a) {
+                html += '<span class="genre-pill">' + escHtml(a) + '</span>';
+            });
+            html += '</div></div>';
+        }
+
+        if (!topNewGenres.length && !topNewStyles.length && !topNewArtists.length) {
+            html += '<p class="empty-subtitle" style="padding:16px 0;">All genres and artists in your want list are already in your collection!</p>';
+        }
+
+        html += '</div>';
+        panel.innerHTML = html;
     });
 }
 
