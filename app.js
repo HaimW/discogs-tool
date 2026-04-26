@@ -992,7 +992,9 @@ function renderRelease(releaseId) {
         }
 
         html += '<a class="discogs-link" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener">View on Discogs &nearr;</a>';
+        html += '</div>';
 
+        html += '<div class="release-tracklist-col">';
         if (tracklistTracks.length > 0) {
             html += vinylTracklistHtml(tracklistTracks);
         } else {
@@ -2856,6 +2858,39 @@ function addSuggestionToQueue(idx) {
 
 // ============ Queue Panel ============
 
+function makeDraggable(panel) {
+    var header = panel.querySelector('.queue-header');
+    if (!header) return;
+    var isDragging = false, ox = 0, oy = 0;
+    header.style.cursor = 'move';
+    header.addEventListener('mousedown', function (e) {
+        if (e.target.closest('button')) return;
+        isDragging = true;
+        var rect = panel.getBoundingClientRect();
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.left = rect.left + 'px';
+        panel.style.top = rect.top + 'px';
+        ox = e.clientX - rect.left;
+        oy = e.clientY - rect.top;
+        e.preventDefault();
+    });
+    function onMove(e) {
+        if (!isDragging) return;
+        var l = Math.max(0, Math.min(window.innerWidth - panel.offsetWidth, e.clientX - ox));
+        var t = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, e.clientY - oy));
+        panel.style.left = l + 'px';
+        panel.style.top = t + 'px';
+    }
+    function onUp() { isDragging = false; }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    panel._cleanup = function () {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+    };
+}
+
 function openQueue() {
     var existing = document.getElementById('queue-panel');
     if (existing) { closeQueue(); return; }
@@ -2865,7 +2900,10 @@ function openQueue() {
 
 function closeQueue() {
     var panel = document.getElementById('queue-panel');
-    if (panel) panel.remove();
+    if (panel) {
+        if (panel._cleanup) panel._cleanup();
+        panel.remove();
+    }
     var btn = document.getElementById('np-queue');
     if (btn) btn.classList.remove('active');
 }
@@ -2909,6 +2947,7 @@ function _renderQueuePanel() {
 
     panel.innerHTML = html;
     document.body.appendChild(panel);
+    makeDraggable(panel);
 
     var npBtn = document.getElementById('np-queue');
     if (npBtn) npBtn.classList.add('active');
