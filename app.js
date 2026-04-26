@@ -6,7 +6,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 4;
+var DB_VERSION = 5;
 var _db = null;
 
 function openDB() {
@@ -44,6 +44,10 @@ function openDB() {
                 var sl = db.createObjectStore('setlists', { keyPath: 'id', autoIncrement: true });
                 sl.createIndex('name', 'name');
                 sl.createIndex('updated_at', 'updated_at');
+            }
+            if (!db.objectStoreNames.contains('tracklist')) {
+                var tl = db.createObjectStore('tracklist', { keyPath: 'id' });
+                tl.createIndex('release_id', 'release_id');
             }
         };
         req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
@@ -351,6 +355,21 @@ async function syncVideosInBackground(config) {
             }
             rel.video_count = vidCount;
             rel.synced_at = new Date().toISOString();
+
+            var tracklistData = data.tracklist || [];
+            for (var ti = 0; ti < tracklistData.length; ti++) {
+                var tl = tracklistData[ti];
+                await dbPut('tracklist', {
+                    id: rel.id + '_' + ti,
+                    release_id: rel.id,
+                    position: tl.position || '',
+                    title: tl.title || '',
+                    duration: tl.duration || '',
+                    type: tl.type_ || 'track',
+                    index: ti
+                });
+            }
+            rel.tracklist_synced = true;
             await dbPut('releases', rel);
         } catch (err) {
             console.error('Error fetching release ' + rel.id + ':', err);
@@ -921,12 +940,16 @@ function renderRelease(releaseId) {
     Promise.all([
         dbGet('releases', releaseId),
         dbGetByIndex('videos', 'release_id', releaseId),
-        dbGetByIndex('track_meta', 'release_id', releaseId)
+        dbGetByIndex('track_meta', 'release_id', releaseId),
+        dbGetByIndex('tracklist', 'release_id', releaseId)
     ]).then(function (results) {
         var r = results[0];
         var videos = results[1].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
         var metaById = {};
         (results[2] || []).forEach(function (m) { metaById[m.id] = m; });
+        var tracklistTracks = (results[3] || [])
+            .filter(function (t) { return t.type !== 'heading'; })
+            .sort(function (a, b) { return (a.index || 0) - (b.index || 0); });
 
         if (!r) { navigate('collection'); return; }
 
@@ -969,6 +992,12 @@ function renderRelease(releaseId) {
         }
 
         html += '<a class="discogs-link" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener">View on Discogs &nearr;</a>';
+
+        if (tracklistTracks.length > 0) {
+            html += vinylTracklistHtml(tracklistTracks);
+        } else {
+            html += '<div id="vt-panel-' + r.id + '"></div>';
+        }
         html += '</div></div>';
 
         // Videos
@@ -1011,7 +1040,72 @@ function renderRelease(releaseId) {
         html += '</div></div>';
 
         document.getElementById('app').innerHTML = html;
+        if (tracklistTracks.length === 0) fetchTracklistLazy(releaseId);
     });
+}
+
+function vinylTracklistHtml(tracks) {
+    var sides = {};
+    var sideOrder = [];
+    tracks.forEach(function (t) {
+        var pos = (t.position || '').trim();
+        var match = pos.match(/^([A-Za-z]+)/);
+        var side = match ? match[1].toUpperCase() : '';
+        if (!sides[side]) { sides[side] = []; sideOrder.push(side); }
+        sides[side].push(t);
+    });
+    if (sideOrder.length === 0) return '';
+    var hasSideLabels = sideOrder.some(function (s) { return s !== ''; });
+    var html = '<div class="vinyl-tracklist">';
+    sideOrder.forEach(function (side) {
+        html += '<div class="vt-side">';
+        if (hasSideLabels && side) {
+            html += '<div class="vt-side-label">Side ' + escHtml(side) + '</div>';
+        }
+        sides[side].forEach(function (t) {
+            html += '<div class="vt-track">' +
+                '<span class="vt-pos">' + escHtml(t.position || '') + '</span>' +
+                '<span class="vt-title">' + escHtml(t.title || '') + '</span>' +
+                '<span class="vt-dur">' + escHtml(t.duration || '') + '</span>' +
+                '</div>';
+        });
+        html += '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
+async function fetchTracklistLazy(releaseId) {
+    var panelEl = document.getElementById('vt-panel-' + releaseId);
+    if (!panelEl) return;
+    try {
+        var config = await getConfig();
+        if (!config.token) return;
+        var data = await discogsGet('/releases/' + releaseId, config);
+        var tracklistData = data.tracklist || [];
+        for (var ti = 0; ti < tracklistData.length; ti++) {
+            var tl = tracklistData[ti];
+            await dbPut('tracklist', {
+                id: releaseId + '_' + ti,
+                release_id: releaseId,
+                position: tl.position || '',
+                title: tl.title || '',
+                duration: tl.duration || '',
+                type: tl.type_ || 'track',
+                index: ti
+            });
+        }
+        var rel = await dbGet('releases', releaseId);
+        if (rel) { rel.tracklist_synced = true; await dbPut('releases', rel); }
+        var displayTracks = tracklistData
+            .filter(function (t) { return t.type_ !== 'heading'; })
+            .map(function (t, i) {
+                return { position: t.position || '', title: t.title || '', duration: t.duration || '', type: t.type_ || 'track', index: i };
+            });
+        if (panelEl) panelEl.innerHTML = vinylTracklistHtml(displayTracks);
+    } catch (err) {
+        console.error('Tracklist fetch failed:', err);
+    }
 }
 
 // ============ Filter / Search Helpers ============
