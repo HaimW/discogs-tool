@@ -295,6 +295,25 @@ a:hover { color: var(--accent-hover); }
 }
 .discogs-link:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ============ VINYL TRACKLIST (in release hero) ============ */
+
+.vinyl-tracklist { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
+.vt-side { margin-bottom: 14px; }
+.vt-side:last-child { margin-bottom: 0; }
+.vt-side-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--accent); font-family: var(--font-mono); font-weight: 700;
+    margin-bottom: 6px;
+}
+.vt-track {
+    display: grid; grid-template-columns: 30px 1fr auto;
+    gap: 0 10px; padding: 3px 0; align-items: baseline;
+}
+.vt-track:hover .vt-title { color: var(--text); }
+.vt-pos { font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-weight: 700; }
+.vt-title { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vt-dur { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
 /* ============ VIDEO LIST ============ */
 
 .video-section { border-top: 1px solid var(--border); padding-top: 24px; }
