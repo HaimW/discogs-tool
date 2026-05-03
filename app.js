@@ -313,6 +313,7 @@ async function syncCollection(config) {
         if (existing) {
             newRel.synced_at = existing.synced_at;
             newRel.video_count = existing.video_count || 0;
+            newRel.country = existing.country || null;
         }
         await dbPut('releases', newRel);
     }
