@@ -6,7 +6,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 6;
+var DB_VERSION = 7;
 var _db = null;
 
 function openDB() {
@@ -53,6 +53,15 @@ function openDB() {
                 var ws = db.createObjectStore('wants', { keyPath: 'id' });
                 ws.createIndex('date_added', 'date_added');
                 ws.createIndex('artist', 'artist');
+            }
+            if (!db.objectStoreNames.contains('marketplace_stats')) {
+                db.createObjectStore('marketplace_stats', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('notifications')) {
+                var ns = db.createObjectStore('notifications', { keyPath: 'id', autoIncrement: true });
+                ns.createIndex('release_id', 'release_id');
+                ns.createIndex('seen', 'seen');
+                ns.createIndex('created_at', 'created_at');
             }
         };
         req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
@@ -765,6 +774,18 @@ function startWantListSync() {
     });
 }
 
+function startAvailabilityCheck() {
+    if (_marketplaceSyncRunning) return;
+    getConfig().then(function (config) {
+        if (!config.token || !config.username) { navigate('setup'); return; }
+        var btn = document.getElementById('wl-avail-btn');
+        if (btn) btn.disabled = true;
+        syncMarketplaceStats(config, false).then(function () {
+            if (btn) btn.disabled = false;
+        });
+    });
+}
+
 async function syncWantList(config) {
     var page = 1;
     var allWants = {};
@@ -876,6 +897,11 @@ async function syncWantListVideosInBackground(config) {
     _wantSyncRunning = false;
     var btn = document.getElementById('wl-sync-btn');
     if (btn) btn.disabled = false;
+
+    // Kick off marketplace availability check silently after full sync
+    syncMarketplaceStats(config, true).catch(function (err) {
+        console.error('Marketplace stats sync failed:', err);
+    });
 }
 
 // ============ Want List View ============
@@ -884,11 +910,16 @@ function renderWantList() {
     Promise.all([
         dbGetAll('wants'),
         dbGetAll('releases'),
-        dbGetAll('videos')
+        dbGetAll('videos'),
+        dbGetAll('marketplace_stats')
     ]).then(function (results) {
         var allWants = results[0];
         var allCollectionReleases = results[1];
         var allVideos = results[2];
+        var allStats = results[3];
+
+        var statsMap = {};
+        allStats.forEach(function (s) { statsMap[s.id] = s; });
 
         // Build collection IDs set for cross-reference
         var collectionIds = {};
@@ -997,6 +1028,7 @@ function renderWantList() {
         html += '<div class="wl-header-actions">';
         html += '<button class="btn btn-primary" id="wl-sync-btn" onclick="startWantListSync()"' + (_wantSyncRunning ? ' disabled' : '') + '>';
         html += '<span class="sync-icon">↻</span> Sync Want List</button>';
+        html += '<button class="btn" id="wl-avail-btn" onclick="startAvailabilityCheck()"' + (_marketplaceSyncRunning ? ' disabled' : '') + ' title="Check how many copies are listed on the marketplace">&#128722; Check Availability</button>';
         html += '<button class="btn" onclick="exportWantListCSV()" title="Export as CSV">↓ CSV</button>';
         html += '</div>';
         html += '</div>';
@@ -1102,6 +1134,14 @@ function renderWantList() {
                 if (w.rating) {
                     html += '<span class="badge badge-wl-rating">' + ratingStars(w.rating) + '</span>';
                 }
+                var wStats = statsMap[w.id];
+                if (wStats && wStats.num_for_sale > 0) {
+                    var saleTxt = wStats.num_for_sale + ' for sale';
+                    if (wStats.lowest_price) saleTxt += ' · ' + (wStats.currency || '') + ' ' + Number(wStats.lowest_price).toFixed(2);
+                    html += '<span class="badge badge-for-sale" title="' + saleTxt + '">' + wStats.num_for_sale + ' for sale</span>';
+                } else if (wStats && wStats.num_for_sale === 0) {
+                    html += '<span class="badge badge-not-for-sale">None listed</span>';
+                }
                 html += '</div>';
 
                 html += '<div class="card-info">';
@@ -1120,6 +1160,7 @@ function renderWantList() {
                     html += '<button class="btn btn-sm btn-primary" onclick="wlPlayRelease(' + w.id + ')" title="Play videos">&#9654;</button>';
                 }
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + w.id + '" target="_blank" rel="noopener" title="View on Discogs">&#8599;</a>';
+                html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + w.id + '" target="_blank" rel="noopener" title="Buy on Discogs marketplace">&#128722;</a>';
                 html += '<button class="btn btn-sm" onclick="wlOpenPricePanel(' + w.id + ', this)" title="Price suggestions">$</button>';
                 html += '<button class="btn btn-sm btn-danger" onclick="wlRemove(' + w.id + ',\'' + escJs(w.artist) + '\',\'' + escJs(w.title) + '\')" title="Remove from want list">&times;</button>';
                 html += '</div>';
@@ -1326,6 +1367,168 @@ function wlOpenPricePanel(releaseId, btn) {
             panel.innerHTML = '<div class="wl-price-empty">Could not load prices.</div>';
         });
     });
+}
+
+// ============ Marketplace Stats & Notifications ============
+
+var _marketplacePollInterval = null;
+var _marketplaceSyncRunning = false;
+
+async function syncMarketplaceStats(config, silent) {
+    if (_marketplaceSyncRunning) return;
+    _marketplaceSyncRunning = true;
+    var wants = await dbGetAll('wants');
+    if (wants.length === 0) { _marketplaceSyncRunning = false; return; }
+
+    if (!silent) showSyncBanner('Checking marketplace availability (0/' + wants.length + ')...');
+
+    for (var i = 0; i < wants.length; i++) {
+        var w = wants[i];
+        if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
+        try {
+            var data = await discogsGet('/marketplace/stats/' + w.id, config);
+            var numForSale = (data && data.num_for_sale) || 0;
+            var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
+            var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
+
+            var existing = await dbGet('marketplace_stats', w.id);
+            var prevNum = existing ? (existing.num_for_sale || 0) : null;
+
+            // Create notification when listings appear for the first time (was 0 or unknown)
+            if (numForSale > 0 && (prevNum === null || prevNum === 0)) {
+                await dbPut('notifications', {
+                    release_id: w.id,
+                    artist: w.artist,
+                    title: w.title,
+                    num_for_sale: numForSale,
+                    lowest_price: lowestPrice,
+                    currency: currency,
+                    seen: false,
+                    created_at: new Date().toISOString()
+                });
+                updateNotifBadge();
+            } else if (numForSale !== (existing ? existing.num_for_sale : null)) {
+                // Silently update stored stats when count changes (up or down)
+            }
+
+            await dbPut('marketplace_stats', {
+                id: w.id,
+                num_for_sale: numForSale,
+                lowest_price: lowestPrice,
+                currency: currency,
+                checked_at: new Date().toISOString()
+            });
+        } catch (err) {
+            console.error('Marketplace stats error for ' + w.id + ':', err);
+        }
+        if (i < wants.length - 1) await sleep(1100);
+    }
+
+    _marketplaceSyncRunning = false;
+    if (_currentView === 'wantlist') renderWantList();
+    if (!silent) {
+        showSyncBanner('Availability check complete!');
+        setTimeout(hideSyncBanner, 2000);
+    }
+}
+
+function startMarketplacePoll() {
+    if (_marketplacePollInterval) return;
+    _marketplacePollInterval = setInterval(function () {
+        getConfig().then(function (config) {
+            if (config.token && config.username && !_marketplaceSyncRunning && !_wantSyncRunning) {
+                syncMarketplaceStats(config, true);
+            }
+        });
+    }, 30 * 60 * 1000);
+}
+
+function updateNotifBadge() {
+    return dbGetAll('notifications').then(function (all) {
+        var unseen = all.filter(function (n) { return !n.seen; }).length;
+        var badge = document.getElementById('notif-badge');
+        if (!badge) return;
+        badge.textContent = unseen;
+        badge.style.display = unseen > 0 ? 'inline-flex' : 'none';
+    });
+}
+
+function toggleNotifPanel() {
+    var panel = document.getElementById('notif-panel');
+    if (!panel) return;
+    if (panel.classList.contains('open')) {
+        closeNotifPanel();
+    } else {
+        openNotifPanel();
+    }
+}
+
+function openNotifPanel() {
+    dbGetAll('notifications').then(function (notifications) {
+        var markPromises = notifications.filter(function (n) { return !n.seen; }).map(function (n) {
+            n.seen = true;
+            return dbPut('notifications', n);
+        });
+        Promise.all(markPromises).then(function () { updateNotifBadge(); });
+
+        notifications.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+
+        var html = '<div class="notif-header">';
+        html += '<span class="notif-title">Marketplace Alerts</span>';
+        html += '<div class="notif-header-actions">';
+        if (notifications.length > 0) {
+            html += '<button class="btn btn-sm btn-danger" onclick="clearAllNotifications()">Clear all</button>';
+        }
+        html += '<button class="btn btn-sm" onclick="closeNotifPanel()">&times;</button>';
+        html += '</div></div>';
+
+        html += '<div class="notif-list">';
+        if (notifications.length === 0) {
+            html += '<div class="notif-empty">No alerts yet.<br>You\'ll be notified when records on your want list go on sale.</div>';
+        } else {
+            notifications.forEach(function (n) {
+                html += '<div class="notif-item">';
+                html += '<div class="notif-item-info">';
+                html += '<div class="notif-item-artist">' + escHtml(n.artist) + '</div>';
+                html += '<div class="notif-item-title">' + escHtml(n.title) + '</div>';
+                html += '<div class="notif-item-detail">';
+                html += '<span class="notif-count">' + n.num_for_sale + ' for sale';
+                if (n.lowest_price) html += ' · ' + (n.currency || '') + ' ' + Number(n.lowest_price).toFixed(2);
+                html += '</span>';
+                html += '<span class="notif-time">' + formatTimeAgo(n.created_at) + '</span>';
+                html += '</div></div>';
+                html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + n.release_id + '" target="_blank" rel="noopener" onclick="closeNotifPanel()">Buy &#128722;</a>';
+                html += '</div>';
+            });
+        }
+        html += '</div>';
+
+        var panel = document.getElementById('notif-panel');
+        panel.innerHTML = html;
+        panel.classList.add('open');
+    });
+}
+
+function closeNotifPanel() {
+    var panel = document.getElementById('notif-panel');
+    if (panel) panel.classList.remove('open');
+}
+
+function clearAllNotifications() {
+    dbClear('notifications').then(function () {
+        updateNotifBadge();
+        openNotifPanel();
+    });
+}
+
+function formatTimeAgo(iso) {
+    var diff = Date.now() - new Date(iso).getTime();
+    var mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + 'm ago';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    return Math.floor(hrs / 24) + 'd ago';
 }
 
 function exportWantListCSV() {
@@ -3780,6 +3983,9 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     _loadCrossfadeSettings();
+
+    updateNotifBadge();
+    startMarketplacePoll();
 
     navigate('collection');
 });
