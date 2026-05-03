@@ -85,6 +85,30 @@
 
     <div id="notif-panel" class="notif-panel"></div>
 
-    <script src="app.js"></script>
+    <!-- Source modules (load order matters: dependencies first) -->
+    <script src="src/utils.js"></script>
+    <script src="src/db.js"></script>
+    <script src="src/meta.js"></script>
+    <script src="src/config.js"></script>
+    <script src="src/api.js"></script>
+    <script src="src/router.js"></script>
+    <script src="src/visualizer.js"></script>
+    <script src="src/player.js"></script>
+    <script src="src/crossfade.js"></script>
+    <script src="src/player_state.js"></script>
+    <script src="src/search.js"></script>
+    <script src="src/meta_editor.js"></script>
+    <script src="src/harmonic.js"></script>
+    <script src="src/queue.js"></script>
+    <script src="src/marketplace.js"></script>
+    <script src="src/setlists.js"></script>
+    <script src="src/backup.js"></script>
+    <script src="src/views/setup.js"></script>
+    <script src="src/views/collection.js"></script>
+    <script src="src/views/wantlist_sync.js"></script>
+    <script src="src/views/wantlist.js"></script>
+    <script src="src/views/tracks.js"></script>
+    <script src="src/views/release.js"></script>
+    <script src="src/init.js"></script>
 </body>
 </html>
