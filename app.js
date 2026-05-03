@@ -1120,6 +1120,7 @@ function renderWantList() {
                     html += '<button class="btn btn-sm btn-primary" onclick="wlPlayRelease(' + w.id + ')" title="Play videos">&#9654;</button>';
                 }
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + w.id + '" target="_blank" rel="noopener" title="View on Discogs">&#8599;</a>';
+                html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + w.id + '" target="_blank" rel="noopener" title="Buy on Discogs marketplace">&#128722;</a>';
                 html += '<button class="btn btn-sm" onclick="wlOpenPricePanel(' + w.id + ', this)" title="Price suggestions">$</button>';
                 html += '<button class="btn btn-sm btn-danger" onclick="wlRemove(' + w.id + ',\'' + escJs(w.artist) + '\',\'' + escJs(w.title) + '\')" title="Remove from want list">&times;</button>';
                 html += '</div>';
