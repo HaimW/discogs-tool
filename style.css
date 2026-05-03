@@ -969,3 +969,98 @@ a:hover { color: var(--accent-hover); }
     font-size: 12px; font-weight: 600; color: var(--text-dim);
     text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
 }
+
+/* ============ AVAILABILITY BADGES (want list cards) ============ */
+
+.badge-for-sale {
+    bottom: 8px; right: 8px;
+    background: rgba(39,174,96,0.85); color: #fff;
+    max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.badge-not-for-sale {
+    bottom: 8px; right: 8px;
+    background: rgba(80,80,80,0.75); color: var(--text-dim);
+    backdrop-filter: blur(4px);
+}
+
+/* ============ NOTIFICATION NAV BADGE ============ */
+
+.notif-nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--danger); color: #fff;
+    font-size: 10px; font-weight: 700;
+    min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 8px; margin-left: 4px; vertical-align: middle;
+    line-height: 1;
+}
+
+/* ============ NOTIFICATION BELL BUTTON ============ */
+
+.btn-notif {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-muted); cursor: pointer;
+    padding: 7px 11px; border-radius: var(--radius-sm);
+    font-size: 16px; line-height: 1; transition: all 0.2s;
+    position: relative;
+}
+.btn-notif:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+/* ============ NOTIFICATION PANEL ============ */
+
+.notif-panel {
+    position: fixed;
+    top: 68px; right: 20px;
+    width: 360px; max-width: calc(100vw - 40px);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius);
+    max-height: 70vh; overflow: hidden;
+    display: none; flex-direction: column;
+    z-index: 300;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px var(--accent-glow);
+}
+.notif-panel.open { display: flex; }
+
+.notif-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.notif-title {
+    font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--accent);
+}
+.notif-header-actions { display: flex; align-items: center; gap: 6px; }
+
+.notif-list { overflow-y: auto; flex: 1; }
+
+.notif-empty {
+    padding: 32px 20px; text-align: center;
+    font-size: 13px; color: var(--text-dim); line-height: 1.6;
+}
+
+.notif-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--bg-hover); }
+
+.notif-item-info { flex: 1; min-width: 0; }
+.notif-item-artist {
+    font-size: 12px; font-weight: 600; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notif-item-title {
+    font-size: 11px; color: var(--text-muted); margin-bottom: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notif-item-detail { display: flex; align-items: center; gap: 8px; }
+.notif-count {
+    font-size: 11px; color: #27ae60; font-weight: 600;
+}
+.notif-time {
+    font-size: 10px; color: var(--text-dim);
+}
+
+@media (max-width: 768px) {
+    .notif-panel { right: 8px; left: 8px; width: auto; top: 64px; }
+}
