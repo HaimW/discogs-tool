@@ -216,9 +216,9 @@ async function discogsGet(path, config, _retries) {
     } catch (err) {
         // Network error or CORS block (429 without CORS headers shows up here)
         if (_retries <= 0) throw err;
-        var backoff = (4 - _retries) * 15;
+        var backoff = [5, 15, 30][3 - _retries] || 5;
         console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
-        showSyncBanner('Rate limited — waiting ' + backoff + 's...');
+        showSyncBanner('Network error — retrying in ' + backoff + 's...');
         await sleep(backoff * 1000);
         return discogsGet(path, config, _retries - 1);
     }
@@ -1478,8 +1478,9 @@ async function syncMarketplaceStats(config, silent) {
                 var existing = await dbGet('marketplace_stats', w.id);
                 var prevNum = existing ? (existing.num_for_sale || 0) : null;
 
-                // Create notification when listings appear for the first time (was 0 or unknown)
-                if (numForSale > 0 && (prevNum === null || prevNum === 0)) {
+                // Notify only when previously confirmed as 0 and now has listings.
+                // prevNum === null means never checked — record baseline silently.
+                if (numForSale > 0 && prevNum !== null && prevNum === 0) {
                     await dbPut('notifications', {
                         release_id: w.id,
                         artist: w.artist,
@@ -1491,8 +1492,6 @@ async function syncMarketplaceStats(config, silent) {
                         created_at: new Date().toISOString()
                     });
                     updateNotifBadge();
-                } else if (numForSale !== (existing ? existing.num_for_sale : null)) {
-                    // Silently update stored stats when count changes (up or down)
                 }
 
                 await dbPut('marketplace_stats', {
