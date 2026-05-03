@@ -14,7 +14,7 @@ async function syncMarketplaceStats(config, silent) {
             var w = wants[i];
             if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
             try {
-                var data = await discogsGet('/marketplace/stats/' + w.id, config, undefined, { noAuth: true });
+                var data = await discogsGet('/marketplace/stats/' + w.id, config);
                 var numForSale = (data && data.num_for_sale) || 0;
                 var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;

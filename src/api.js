@@ -1,14 +1,10 @@
 // ============ Discogs API ============
 
-async function discogsGet(path, config, _retries, _opts) {
+async function discogsGet(path, config, _retries) {
     if (_retries === undefined) _retries = 3;
-    if (_opts === undefined) _opts = {};
-    var headers = {};
-    // Sending Authorization triggers a CORS preflight; skip it for public
-    // endpoints (e.g. /marketplace/stats/) that work without authentication.
-    if (!_opts.noAuth) {
-        headers['Authorization'] = 'Discogs token=' + config.token;
-    }
+    var headers = {
+        'Authorization': 'Discogs token=' + config.token
+    };
     var r;
     try {
         r = await fetch('https://api.discogs.com' + path, { headers: headers });
@@ -19,7 +15,7 @@ async function discogsGet(path, config, _retries, _opts) {
         console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
         showSyncBanner('Network error — retrying in ' + backoff + 's...');
         await sleep(backoff * 1000);
-        return discogsGet(path, config, _retries - 1, _opts);
+        return discogsGet(path, config, _retries - 1);
     }
 
     // Explicit 429
@@ -30,7 +26,7 @@ async function discogsGet(path, config, _retries, _opts) {
         console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
-        return discogsGet(path, config, _retries - 1, _opts);
+        return discogsGet(path, config, _retries - 1);
     }
 
     if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
