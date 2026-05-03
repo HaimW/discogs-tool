@@ -344,7 +344,7 @@ async function syncCollection(config) {
 // resolves. Not awaited — it updates the banner independently.
 async function syncVideosInBackground(config) {
     var releases = await dbGetAll('releases');
-    var unsynced = releases.filter(function (r) { return !r.synced_at; });
+    var unsynced = releases.filter(function (r) { return !r.synced_at || !r.country; });
     var total = unsynced.length;
     if (total === 0) {
         hideSyncBanner();
@@ -869,7 +869,7 @@ async function syncWantList(config) {
 
 async function syncWantListVideosInBackground(config) {
     var wants = await dbGetAll('wants');
-    var unsynced = wants.filter(function (w) { return !w.synced_at; });
+    var unsynced = wants.filter(function (w) { return !w.synced_at || !w.country; });
     var total = unsynced.length;
     if (total === 0) {
         hideSyncBanner();
