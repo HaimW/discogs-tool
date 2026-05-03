@@ -10,23 +10,23 @@
 </head>
 <body>
     <nav class="top-nav">
-        <a href="#" class="nav-brand" onclick="navigate('collection'); return false;">
+        <a href="#" class="nav-brand" id="nav-brand" data-nav="collection">
             <span class="vinyl-icon">&#9898;</span>
             Vinyl Collection Player
         </a>
         <div class="nav-links">
-            <a href="#" class="nav-link" onclick="navigate('collection'); return false;">Collection</a>
-            <a href="#" class="nav-link" onclick="navigate('tracks'); return false;">Tracks</a>
-            <a href="#" class="nav-link" onclick="navigate('wantlist'); return false;">Want List <span id="notif-badge" class="notif-nav-badge" style="display:none;">0</span></a>
-            <a href="#" class="nav-link" onclick="navigate('setlists'); return false;">Setlists</a>
-            <a href="#" class="nav-link" onclick="navigate('backup'); return false;">Backup</a>
+            <a href="#" class="nav-link" data-nav="collection">Collection</a>
+            <a href="#" class="nav-link" data-nav="tracks">Tracks</a>
+            <a href="#" class="nav-link" data-nav="wantlist">Want List <span id="notif-badge" class="notif-nav-badge" style="display:none;">0</span></a>
+            <a href="#" class="nav-link" data-nav="setlists">Setlists</a>
+            <a href="#" class="nav-link" data-nav="backup">Backup</a>
         </div>
         <div class="nav-actions">
-            <button class="btn btn-sync" id="sync-btn" onclick="startSync()">
+            <button class="btn btn-sync" id="sync-btn">
                 <span class="sync-icon">&#8635;</span>
                 Sync Collection
             </button>
-            <button class="btn btn-notif" id="notif-bell-btn" onclick="toggleNotifPanel()" title="Marketplace alerts">&#128276;</button>
+            <button class="btn btn-notif" id="notif-bell-btn" title="Marketplace alerts">&#128276;</button>
         </div>
     </nav>
 
