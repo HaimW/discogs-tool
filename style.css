@@ -159,6 +159,14 @@ a:hover { color: var(--accent-hover); }
 .form-input:focus { border-color: var(--accent); }
 .form-input::placeholder { color: var(--text-dim); }
 .form-hint { margin-top: 6px; font-size: 12px; color: var(--text-dim); }
+.token-input-wrap { position: relative; display: flex; align-items: center; }
+.token-input-wrap .form-input { padding-right: 40px; }
+.btn-show-token {
+    position: absolute; right: 8px; background: none; border: none;
+    cursor: pointer; font-size: 16px; color: var(--text-dim); padding: 2px 4px;
+    line-height: 1;
+}
+.btn-show-token:hover { color: var(--text); }
 .btn-full { width: 100%; justify-content: center; margin-top: 8px; }
 
 /* ============ COLLECTION HEADER ============ */

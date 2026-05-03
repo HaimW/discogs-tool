@@ -64,7 +64,21 @@ function openDB() {
                 ns.createIndex('created_at', 'created_at');
             }
         };
-        req.onsuccess = function (e) { _db = e.target.result; resolve(_db); };
+        req.onblocked = function () {
+            console.warn('IndexedDB upgrade blocked by another open tab. Please close other tabs and reload.');
+        };
+        req.onsuccess = function (e) {
+            _db = e.target.result;
+            // If another tab opens a newer DB version, close this connection so
+            // the upgrade can proceed rather than hanging indefinitely.
+            _db.onversionchange = function () {
+                _db.close();
+                _db = null;
+                alert('The app database was updated in another tab. This tab will now reload.');
+                window.location.reload();
+            };
+            resolve(_db);
+        };
         req.onerror = function (e) { reject(e.target.error); };
     });
 }
@@ -212,7 +226,8 @@ async function discogsGet(path, config, _retries) {
     // Explicit 429
     if (r.status === 429) {
         if (_retries <= 0) throw new Error('Rate limited after retries');
-        var wait = parseInt(r.headers.get('Retry-After') || '30') * 1000;
+        var _retryAfter = parseInt(r.headers.get('Retry-After'), 10);
+        var wait = (Number.isFinite(_retryAfter) && _retryAfter > 0 ? _retryAfter : 30) * 1000;
         console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
@@ -562,7 +577,10 @@ function renderSetup() {
             '</div>' +
             '<div class="form-group">' +
             '<label class="form-label" for="token">Personal Access Token</label>' +
-            '<input type="text" id="setup-token" class="form-input" placeholder="Paste your token here" value="' + escHtml(config.token) + '">' +
+            '<div class="token-input-wrap">' +
+            '<input type="password" id="setup-token" class="form-input" placeholder="Paste your token here" value="' + escHtml(config.token) + '" autocomplete="current-password">' +
+            '<button type="button" class="btn-show-token" id="show-token-btn" onclick="toggleTokenVisibility()" aria-label="Show token">&#128065;</button>' +
+            '</div>' +
             '<p class="form-hint">Generate a token at <a href="https://www.discogs.com/settings/developers" target="_blank" rel="noopener">Discogs Developer Settings</a></p>' +
             '</div>' +
             '<button class="btn btn-primary btn-large btn-full" onclick="submitSetup()">Save &amp; Continue</button>' +
@@ -575,6 +593,21 @@ function submitSetup() {
     var username = document.getElementById('setup-username').value.trim();
     if (!token || !username) { alert('Both fields are required.'); return; }
     saveConfig(token, username).then(function () { navigate('collection'); });
+}
+
+function toggleTokenVisibility() {
+    var input = document.getElementById('setup-token');
+    var btn = document.getElementById('show-token-btn');
+    if (!input) return;
+    if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '🙈'; // see-no-evil as "hide" indicator
+        btn.setAttribute('aria-label', 'Hide token');
+    } else {
+        input.type = 'password';
+        btn.textContent = '👁'; // eye
+        btn.setAttribute('aria-label', 'Show token');
+    }
 }
 
 // ============ Collection View ============
@@ -1427,58 +1460,61 @@ var _marketplaceSyncRunning = false;
 async function syncMarketplaceStats(config, silent) {
     if (_marketplaceSyncRunning) return;
     _marketplaceSyncRunning = true;
-    var wants = await dbGetAll('wants');
-    if (wants.length === 0) { _marketplaceSyncRunning = false; return; }
+    try {
+        var wants = await dbGetAll('wants');
+        if (wants.length === 0) return;
 
-    if (!silent) showSyncBanner('Checking marketplace availability (0/' + wants.length + ')...');
+        if (!silent) showSyncBanner('Checking marketplace availability (0/' + wants.length + ')...');
 
-    for (var i = 0; i < wants.length; i++) {
-        var w = wants[i];
-        if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
-        try {
-            var data = await discogsGet('/marketplace/stats/' + w.id, config);
-            var numForSale = (data && data.num_for_sale) || 0;
-            var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
-            var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
+        for (var i = 0; i < wants.length; i++) {
+            var w = wants[i];
+            if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
+            try {
+                var data = await discogsGet('/marketplace/stats/' + w.id, config);
+                var numForSale = (data && data.num_for_sale) || 0;
+                var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
+                var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
 
-            var existing = await dbGet('marketplace_stats', w.id);
-            var prevNum = existing ? (existing.num_for_sale || 0) : null;
+                var existing = await dbGet('marketplace_stats', w.id);
+                var prevNum = existing ? (existing.num_for_sale || 0) : null;
 
-            // Create notification when listings appear for the first time (was 0 or unknown)
-            if (numForSale > 0 && (prevNum === null || prevNum === 0)) {
-                await dbPut('notifications', {
-                    release_id: w.id,
-                    artist: w.artist,
-                    title: w.title,
+                // Create notification when listings appear for the first time (was 0 or unknown)
+                if (numForSale > 0 && (prevNum === null || prevNum === 0)) {
+                    await dbPut('notifications', {
+                        release_id: w.id,
+                        artist: w.artist,
+                        title: w.title,
+                        num_for_sale: numForSale,
+                        lowest_price: lowestPrice,
+                        currency: currency,
+                        seen: false,
+                        created_at: new Date().toISOString()
+                    });
+                    updateNotifBadge();
+                } else if (numForSale !== (existing ? existing.num_for_sale : null)) {
+                    // Silently update stored stats when count changes (up or down)
+                }
+
+                await dbPut('marketplace_stats', {
+                    id: w.id,
                     num_for_sale: numForSale,
                     lowest_price: lowestPrice,
                     currency: currency,
-                    seen: false,
-                    created_at: new Date().toISOString()
+                    checked_at: new Date().toISOString()
                 });
-                updateNotifBadge();
-            } else if (numForSale !== (existing ? existing.num_for_sale : null)) {
-                // Silently update stored stats when count changes (up or down)
+            } catch (err) {
+                console.error('Marketplace stats error for ' + w.id + ':', err);
             }
-
-            await dbPut('marketplace_stats', {
-                id: w.id,
-                num_for_sale: numForSale,
-                lowest_price: lowestPrice,
-                currency: currency,
-                checked_at: new Date().toISOString()
-            });
-        } catch (err) {
-            console.error('Marketplace stats error for ' + w.id + ':', err);
+            if (i < wants.length - 1) await sleep(1100);
         }
-        if (i < wants.length - 1) await sleep(1100);
-    }
 
-    _marketplaceSyncRunning = false;
-    if (_currentView === 'wantlist') renderWantList();
-    if (!silent) {
-        showSyncBanner('Availability check complete!');
-        setTimeout(hideSyncBanner, 2000);
+        if (_currentView === 'wantlist') renderWantList();
+        if (!silent) {
+            showSyncBanner('Availability check complete!');
+            setTimeout(hideSyncBanner, 2000);
+        }
+    } finally {
+        _marketplaceSyncRunning = false;
     }
 }
 
@@ -4073,6 +4109,16 @@ document.addEventListener('DOMContentLoaded', function () {
         window.scrollTo(0, 0);
         _navFromPop = false;
     });
+
+    // Static nav links wired via data-nav attribute
+    document.querySelectorAll('[data-nav]').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+            e.preventDefault();
+            navigate(el.getAttribute('data-nav'));
+        });
+    });
+    document.getElementById('sync-btn').addEventListener('click', startSync);
+    document.getElementById('notif-bell-btn').addEventListener('click', toggleNotifPanel);
 
     navigate('collection');
 });
