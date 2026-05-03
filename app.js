@@ -204,12 +204,15 @@ function isConfigured() {
 
 // ============ Discogs API ============
 
-async function discogsGet(path, config, _retries) {
+async function discogsGet(path, config, _retries, _opts) {
     if (_retries === undefined) _retries = 3;
-    var headers = {
-        'Authorization': 'Discogs token=' + config.token,
-        'User-Agent': 'VinylCollectionPlayer/2.0'
-    };
+    if (_opts === undefined) _opts = {};
+    var headers = {};
+    // Sending Authorization triggers a CORS preflight; skip it for public
+    // endpoints (e.g. /marketplace/stats/) that work without authentication.
+    if (!_opts.noAuth) {
+        headers['Authorization'] = 'Discogs token=' + config.token;
+    }
     var r;
     try {
         r = await fetch('https://api.discogs.com' + path, { headers: headers });
@@ -220,7 +223,7 @@ async function discogsGet(path, config, _retries) {
         console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
         showSyncBanner('Network error — retrying in ' + backoff + 's...');
         await sleep(backoff * 1000);
-        return discogsGet(path, config, _retries - 1);
+        return discogsGet(path, config, _retries - 1, _opts);
     }
 
     // Explicit 429
@@ -231,7 +234,7 @@ async function discogsGet(path, config, _retries) {
         console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
-        return discogsGet(path, config, _retries - 1);
+        return discogsGet(path, config, _retries - 1, _opts);
     }
 
     if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
@@ -1470,7 +1473,7 @@ async function syncMarketplaceStats(config, silent) {
             var w = wants[i];
             if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
             try {
-                var data = await discogsGet('/marketplace/stats/' + w.id, config);
+                var data = await discogsGet('/marketplace/stats/' + w.id, config, undefined, { noAuth: true });
                 var numForSale = (data && data.num_for_sale) || 0;
                 var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
