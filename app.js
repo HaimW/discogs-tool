@@ -390,6 +390,7 @@ async function syncVideosInBackground(config) {
             }
             rel.video_count = vidCount;
             rel.synced_at = new Date().toISOString();
+            rel.country = data.country || rel.country || null;
 
             var tracklistData = data.tracklist || [];
             for (var ti = 0; ti < tracklistData.length; ti++) {
@@ -462,7 +463,8 @@ async function fetchFolderReleases(config, folderId, allReleases, tagFolderId, s
                     date_added: item.date_added || null,
                     synced_at: null,
                     video_count: 0,
-                    folder_ids: []
+                    folder_ids: [],
+                    country: null
                 };
             } else if (!skipDuplicates) {
                 allReleases[rid].quantity++;
@@ -503,10 +505,10 @@ function extractYoutubeId(uri) {
 
 var _currentView = '';
 var _filters = {
-    q: '', genre: '', folder: '', sort: 'artist', page: 1,
+    q: '', genre: '', folder: '', country: '', sort: 'artist', page: 1,
     tracks: { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 },
     setlistId: null,
-    wantlist: { q: '', genre: '', format: '', decade: '', sort: 'artist', page: 1 }
+    wantlist: { q: '', genre: '', format: '', decade: '', country: '', sort: 'artist', page: 1 }
 };
 var _navHistory = [];
 var _navFromPop = false;
@@ -611,6 +613,11 @@ function renderCollection() {
                 return r.folder_ids && r.folder_ids.indexOf(fid) !== -1;
             });
         }
+        if (_filters.country) {
+            filtered = filtered.filter(function (r) {
+                return r.country === _filters.country;
+            });
+        }
 
         // Sort
         var sortKey = _filters.sort || 'artist';
@@ -637,6 +644,11 @@ function renderCollection() {
             if (r.genres) r.genres.split(', ').forEach(function (g) { if (g) genreSet[g] = true; });
         });
         var genres = Object.keys(genreSet).sort();
+
+        // Get unique countries
+        var countrySet = {};
+        allReleases.forEach(function (r) { if (r.country) countrySet[r.country] = true; });
+        var countries = Object.keys(countrySet).sort();
 
         // Build HTML
         var html = '';
@@ -673,6 +685,16 @@ function renderCollection() {
             html += '<span class="genre-pill' + (!_filters.genre ? ' active' : '') + '" onclick="setFilter(\'genre\',\'\')">All</span>';
             genres.forEach(function (g) {
                 html += '<span class="genre-pill' + (_filters.genre === g ? ' active' : '') + '" onclick="setFilter(\'genre\',\'' + escJs(g) + '\')">' + escHtml(g) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Country pills
+        if (countries.length > 0) {
+            html += '<div class="genre-pills"><span class="filter-label">Country:</span>';
+            html += '<span class="genre-pill' + (!_filters.country ? ' active' : '') + '" onclick="setFilter(\'country\',\'\')">All</span>';
+            countries.forEach(function (c) {
+                html += '<span class="genre-pill' + (_filters.country === c ? ' active' : '') + '" onclick="setFilter(\'country\',\'' + escJs(c) + '\')">' + escHtml(c) + '</span>';
             });
             html += '</div>';
         }
@@ -732,7 +754,7 @@ function renderCollection() {
                 html += '</div>';
             }
         } else {
-            if (_filters.q || _filters.genre || _filters.folder) {
+            if (_filters.q || _filters.genre || _filters.folder || _filters.country) {
                 html += '<div class="empty-state"><p class="empty-title">No releases found</p>' +
                         '<p class="empty-subtitle">Try a different search or filter</p>' +
                         '<button class="btn btn-primary" onclick="clearAllFilters()">Show All</button></div>';
@@ -820,7 +842,8 @@ async function syncWantList(config) {
                 rating: item.rating || 0,
                 date_added: item.date_added || null,
                 video_count: existing ? (existing.video_count || 0) : 0,
-                synced_at: existing ? (existing.synced_at || null) : null
+                synced_at: existing ? (existing.synced_at || null) : null,
+                country: existing ? (existing.country || null) : null
             };
         }
         var pagination = data.pagination || {};
@@ -889,6 +912,7 @@ async function syncWantListVideosInBackground(config) {
             }
             want.video_count = vidCount;
             want.synced_at = new Date().toISOString();
+            want.country = data.country || want.country || null;
             await dbPut('wants', want);
         } catch (err) {
             console.error('Error fetching want release ' + want.id + ':', err);
@@ -965,6 +989,11 @@ function renderWantList() {
                 return w.year && w.year >= decadeStart && w.year < decadeStart + 10;
             });
         }
+        if (wf.country) {
+            filtered = filtered.filter(function (w) {
+                return w.country === wf.country;
+            });
+        }
 
         // Sort
         var sortKey = wf.sort || 'artist';
@@ -993,6 +1022,7 @@ function renderWantList() {
         var notInCollection = 0;
         var genreSet = {};
         var formatSet = {};
+        var countrySet = {};
         allWants.forEach(function (w) {
             if (w.year) {
                 var dec = Math.floor(w.year / 10) * 10;
@@ -1004,6 +1034,7 @@ function renderWantList() {
             if (w.formats) w.formats.split(', ').forEach(function (f) {
                 if (f) { formatCounts[f] = (formatCounts[f] || 0) + 1; formatSet[f] = true; }
             });
+            if (w.country) countrySet[w.country] = true;
             if (!collectionIds[w.id]) notInCollection++;
         });
 
@@ -1013,6 +1044,7 @@ function renderWantList() {
 
         var genres = Object.keys(genreSet).sort();
         var formats = Object.keys(formatSet).sort();
+        var countries = Object.keys(countrySet).sort();
         var decadesSorted = Object.keys(decadeCounts).map(Number).sort(function (a, b) { return a - b; });
 
         // ---- Build HTML ----
@@ -1099,6 +1131,16 @@ function renderWantList() {
             html += '<span class="genre-pill' + (!wf.format ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'\')">All</span>';
             formats.forEach(function (f) {
                 html += '<span class="genre-pill' + (wf.format === f ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'' + escJs(f) + '\')">' + escHtml(f) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // Country filter pills
+        if (countries.length > 0) {
+            html += '<div class="genre-pills"><span class="filter-label">Country:</span>';
+            html += '<span class="genre-pill' + (!wf.country ? ' active' : '') + '" onclick="wlSetFilter(\'country\',\'\')">All</span>';
+            countries.forEach(function (c) {
+                html += '<span class="genre-pill' + (wf.country === c ? ' active' : '') + '" onclick="wlSetFilter(\'country\',\'' + escJs(c) + '\')">' + escHtml(c) + '</span>';
             });
             html += '</div>';
         }
@@ -1212,7 +1254,7 @@ function wlSetFilter(k, v) { _filters.wantlist[k] = v; _filters.wantlist.page = 
 function wlSetSort(s) { _filters.wantlist.sort = s; renderWantList(); }
 function wlGoPage(p) { _filters.wantlist.page = p; renderWantList(); window.scrollTo(0, 0); }
 function wlClearFilters() {
-    _filters.wantlist = { q: '', genre: '', format: '', decade: '', sort: 'artist', page: 1 };
+    _filters.wantlist = { q: '', genre: '', format: '', decade: '', country: '', sort: 'artist', page: 1 };
     renderWantList();
 }
 
@@ -1261,6 +1303,7 @@ function wlShufflePlay(limitOverride) {
             var ds = parseInt(wf.decade, 10);
             filtered = filtered.filter(function (w) { return w.year && w.year >= ds && w.year < ds + 10; });
         }
+        if (wf.country) filtered = filtered.filter(function (w) { return w.country === wf.country; });
 
         var ids = filtered.map(function (w) { return w.id; });
         if (ids.length === 0) { alert('No wants match the current filters.'); return; }
@@ -2091,6 +2134,7 @@ function clearAllFilters() {
     _filters.q = '';
     _filters.genre = '';
     _filters.folder = '';
+    _filters.country = '';
     _filters.page = 1;
     renderCollection();
 }
@@ -2886,6 +2930,11 @@ function shufflePlay(limitOverride) {
             var fid = parseInt(_filters.folder);
             filtered = filtered.filter(function (r) {
                 return r.folder_ids && r.folder_ids.indexOf(fid) !== -1;
+            });
+        }
+        if (_filters.country) {
+            filtered = filtered.filter(function (r) {
+                return r.country === _filters.country;
             });
         }
 
