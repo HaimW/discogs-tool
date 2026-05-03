@@ -277,7 +277,11 @@ function hideSyncBanner() {
     document.getElementById('sync-banner').style.display = 'none';
 }
 
-function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+var _testOverrides = {};
+function sleep(ms) {
+    if (_testOverrides.sleep) return _testOverrides.sleep(ms);
+    return new Promise(function (r) { setTimeout(r, ms); });
+}
 
 async function syncCollection(config) {
     // Phase 0: Fetch folders
@@ -578,6 +582,46 @@ function submitSetup() {
 
 // ============ Collection View ============
 
+function filterSortPaginate(releases, filters, perPage) {
+    perPage = perPage || 48;
+    var filtered = releases;
+    var q = (filters.q || '').toLowerCase();
+    if (q) {
+        filtered = filtered.filter(function (r) {
+            return r.artist.toLowerCase().indexOf(q) !== -1 ||
+                   r.title.toLowerCase().indexOf(q) !== -1;
+        });
+    }
+    if (filters.genre) {
+        filtered = filtered.filter(function (r) {
+            return r.genres && r.genres.indexOf(filters.genre) !== -1;
+        });
+    }
+    if (filters.folder) {
+        var fid = parseInt(filters.folder);
+        filtered = filtered.filter(function (r) {
+            return r.folder_ids && r.folder_ids.indexOf(fid) !== -1;
+        });
+    }
+    if (filters.country) {
+        filtered = filtered.filter(function (r) { return r.country === filters.country; });
+    }
+    var sortKey = filters.sort || 'artist';
+    filtered.sort(function (a, b) {
+        switch (sortKey) {
+            case 'title': return (a.title || '').localeCompare(b.title || '');
+            case 'year': return (b.year || 0) - (a.year || 0);
+            case 'date_added': return (b.date_added || '').localeCompare(a.date_added || '');
+            default: return (a.artist || '').localeCompare(b.artist || '');
+        }
+    });
+    var page = filters.page || 1;
+    var totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+    if (page > totalPages) page = totalPages;
+    var start = (page - 1) * perPage;
+    return { filtered: filtered, page: page, totalPages: totalPages, pageReleases: filtered.slice(start, start + perPage) };
+}
+
 function renderCollection() {
     Promise.all([dbGetAll('releases'), dbGetAll('folders'), dbGetAll('videos')]).then(function (results) {
         var allReleases = results[0];
@@ -593,50 +637,11 @@ function renderCollection() {
             r.video_count = videoCounts[r.id] || 0;
         });
 
-        // Filter
-        var filtered = allReleases;
-        var q = _filters.q.toLowerCase();
-        if (q) {
-            filtered = filtered.filter(function (r) {
-                return r.artist.toLowerCase().indexOf(q) !== -1 ||
-                       r.title.toLowerCase().indexOf(q) !== -1;
-            });
-        }
-        if (_filters.genre) {
-            filtered = filtered.filter(function (r) {
-                return r.genres && r.genres.indexOf(_filters.genre) !== -1;
-            });
-        }
-        if (_filters.folder) {
-            var fid = parseInt(_filters.folder);
-            filtered = filtered.filter(function (r) {
-                return r.folder_ids && r.folder_ids.indexOf(fid) !== -1;
-            });
-        }
-        if (_filters.country) {
-            filtered = filtered.filter(function (r) {
-                return r.country === _filters.country;
-            });
-        }
-
-        // Sort
-        var sortKey = _filters.sort || 'artist';
-        filtered.sort(function (a, b) {
-            switch (sortKey) {
-                case 'title': return (a.title || '').localeCompare(b.title || '');
-                case 'year': return (b.year || 0) - (a.year || 0);
-                case 'date_added': return (b.date_added || '').localeCompare(a.date_added || '');
-                default: return (a.artist || '').localeCompare(b.artist || '');
-            }
-        });
-
-        // Paginate
-        var perPage = 48;
-        var page = _filters.page || 1;
-        var totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
-        if (page > totalPages) page = totalPages;
-        var start = (page - 1) * perPage;
-        var pageReleases = filtered.slice(start, start + perPage);
+        var fsp = filterSortPaginate(allReleases, _filters);
+        var filtered = fsp.filtered;
+        var page = fsp.page;
+        var totalPages = fsp.totalPages;
+        var pageReleases = fsp.pageReleases;
 
         // Get unique genres
         var genreSet = {};
@@ -2732,9 +2737,11 @@ var _cfFadeInterval = null;
 var _cfCheckInterval = null;
 
 // Load YouTube IFrame API
-var ytTag = document.createElement('script');
-ytTag.src = 'https://www.youtube.com/iframe_api';
-document.head.appendChild(ytTag);
+if (typeof document !== 'undefined') {
+    var ytTag = document.createElement('script');
+    ytTag.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(ytTag);
+}
 
 function onYouTubeIframeAPIReady() {
     player = new YT.Player('player-container', {
@@ -4075,3 +4082,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     navigate('collection');
 });
+
+if (typeof module !== 'undefined') {
+    module.exports = { extractYoutubeId, escHtml, escJs, filterSortPaginate, discogsGet, _testOverrides };
+}

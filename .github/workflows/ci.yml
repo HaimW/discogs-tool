@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [v2-github-pages]
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Run tests
+        run: node --test tests/*.test.js
+
+  validate-html:
+    name: Validate HTML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tidy
+        run: sudo apt-get install -y tidy
+      - name: Check index.html for errors
+        run: |
+          tidy -errors -quiet --show-warnings yes index.html; EC=$?
+          if [ $EC -ge 2 ]; then exit 1; fi
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install ESLint
+        run: npm install --no-save eslint@8
+      - name: Lint app.js
+        run: |
+          npx eslint app.js \
+            --env browser \
+            --env es2017 \
+            --rule 'eqeqeq: ["error", "always"]' \
+            --rule 'no-eval: error' \
+            --rule 'no-implied-eval: error' \
+            --rule 'no-undef: warn' \
+            --rule 'no-unused-vars: warn' \
+            --parser-options 'ecmaVersion:2017' \
+            --max-warnings 50
