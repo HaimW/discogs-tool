@@ -508,8 +508,14 @@ var _filters = {
     setlistId: null,
     wantlist: { q: '', genre: '', format: '', decade: '', sort: 'artist', page: 1 }
 };
+var _navHistory = [];
+var _navFromPop = false;
 
 function navigate(view, params) {
+    if (_currentView && !_navFromPop) {
+        _navHistory.push({ view: _currentView, filters: JSON.parse(JSON.stringify(_filters)) });
+        history.pushState(null, '');
+    }
     _currentView = view;
     if (params) {
         for (var k in params) _filters[k] = params[k];
@@ -1861,7 +1867,8 @@ function renderRelease(releaseId) {
         dbGet('releases', releaseId),
         dbGetByIndex('videos', 'release_id', releaseId),
         dbGetByIndex('track_meta', 'release_id', releaseId),
-        dbGetByIndex('tracklist', 'release_id', releaseId)
+        dbGetByIndex('tracklist', 'release_id', releaseId),
+        dbGet('wants', releaseId)
     ]).then(function (results) {
         var r = results[0];
         var videos = results[1].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
@@ -1870,10 +1877,27 @@ function renderRelease(releaseId) {
         var tracklistTracks = (results[3] || [])
             .filter(function (t) { return t.type !== 'heading'; })
             .sort(function (a, b) { return (a.index || 0) - (b.index || 0); });
+        var want = results[4];
+
+        if (!r && want) {
+            r = {
+                id: want.id,
+                title: want.title,
+                artist: want.artist,
+                year: want.year,
+                cover_url: want.thumb_url || '',
+                thumb_url: want.thumb_url || '',
+                genres: want.genres ? (Array.isArray(want.genres) ? want.genres.join(', ') : want.genres) : '',
+                format: want.formats ? (Array.isArray(want.formats) ? want.formats.join(', ') : want.formats) : '',
+                _fromWantlist: true
+            };
+        }
 
         if (!r) { navigate('collection'); return; }
 
-        var html = '<span class="back-link" onclick="navigate(\'collection\')">&larr; Back to collection</span>';
+        var backView = r._fromWantlist ? 'wantlist' : 'collection';
+        var backLabel = r._fromWantlist ? '&larr; Back to want list' : '&larr; Back to collection';
+        var html = '<span class="back-link" onclick="navigate(\'' + backView + '\')">' + backLabel + '</span>';
         html += '<div class="release-detail"><div class="release-hero">';
 
         // Cover
@@ -2701,6 +2725,7 @@ function onPlayerStateChange(event) {
         if (currentIndex < currentQueue.length - 1) {
             currentIndex++;
             loadFromQueue(currentIndex);
+            if (document.getElementById('queue-panel')) _renderQueuePanel();
         } else {
             isPlaying = false;
             stopViz();
@@ -2717,6 +2742,7 @@ function onPlayerStateChange(event) {
             updatePlayPauseBtn();
             _savePlayerState();
             if (cfEnabled) setTimeout(_preloadNextTrack, 800);
+            if (document.getElementById('queue-panel')) _renderQueuePanel();
             return;
         }
         isPlaying = true;
@@ -3946,10 +3972,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isPlaying) player.pauseVideo(); else player.playVideo();
     });
     document.getElementById('np-next').addEventListener('click', function () {
-        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); }
+        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel(); }
     });
     document.getElementById('np-prev').addEventListener('click', function () {
-        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); }
+        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel(); }
     });
     document.getElementById('np-suggest').addEventListener('click', openSuggestions);
     document.getElementById('np-queue').addEventListener('click', openQueue);
@@ -3986,6 +4012,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     updateNotifBadge();
     startMarketplacePoll();
+
+    window.addEventListener('popstate', function () {
+        if (_navHistory.length === 0) return;
+        var prev = _navHistory.pop();
+        _navFromPop = true;
+        _currentView = prev.view;
+        _filters = prev.filters;
+        renderCurrentView();
+        window.scrollTo(0, 0);
+        _navFromPop = false;
+    });
 
     navigate('collection');
 });
