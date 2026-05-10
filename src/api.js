@@ -89,6 +89,39 @@ function hideSyncBanner() {
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+// Public Discogs endpoints (e.g. /marketplace/stats) do not need authentication.
+// Sending an Authorization header forces a CORS preflight (OPTIONS) which Discogs
+// does not support for these endpoints, causing the browser to block the request.
+// This function makes a plain GET with no custom headers so the browser treats it
+// as a simple CORS request (no preflight required).
+async function discogsGetPublic(path, _retries) {
+    if (_retries === undefined) _retries = 3;
+    var r;
+    try {
+        r = await fetch('https://api.discogs.com' + path);
+    } catch (err) {
+        if (_retries <= 0) throw err;
+        var backoff = [5, 15, 30][3 - _retries] || 5;
+        console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
+        showSyncBanner('Network error — retrying in ' + backoff + 's...');
+        await sleep(backoff * 1000);
+        return discogsGetPublic(path, _retries - 1);
+    }
+
+    if (r.status === 429) {
+        if (_retries <= 0) throw new Error('Rate limited after retries');
+        var _retryAfter = parseInt(r.headers.get('Retry-After'), 10);
+        var wait = (Number.isFinite(_retryAfter) && _retryAfter > 0 ? _retryAfter : 60) * 1000;
+        console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
+        showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
+        await sleep(wait);
+        return discogsGetPublic(path, _retries - 1);
+    }
+
+    if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
+    return r.json();
+}
+
 async function syncCollection(config) {
     // Phase 0: Fetch folders
     showSyncBanner('Fetching folders...');

@@ -1,7 +1,7 @@
 var _marketplacePollInterval = null;
 var _marketplaceSyncRunning = false;
 
-async function syncMarketplaceStats(config, silent) {
+async function syncMarketplaceStats(silent) {
     if (_marketplaceSyncRunning) return;
     _marketplaceSyncRunning = true;
     try {
@@ -14,7 +14,7 @@ async function syncMarketplaceStats(config, silent) {
             var w = wants[i];
             if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + wants.length + ' — ' + w.artist);
             try {
-                var data = await discogsGet('/marketplace/stats/' + w.id, config);
+                var data = await discogsGetPublic('/marketplace/stats/' + w.id);
                 var numForSale = (data && data.num_for_sale) || 0;
                 var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
@@ -48,7 +48,9 @@ async function syncMarketplaceStats(config, silent) {
             } catch (err) {
                 console.error('Marketplace stats error for ' + w.id + ':', err);
             }
-            if (i < wants.length - 1) await sleep(1100);
+            // Unauthenticated Discogs requests are capped at 25 req/min (2.4 s each).
+            // 2500 ms keeps us safely under that limit.
+            if (i < wants.length - 1) await sleep(2500);
         }
 
         if (_currentView === 'wantlist') renderWantList();
@@ -66,7 +68,7 @@ function startMarketplacePoll() {
     _marketplacePollInterval = setInterval(function () {
         getConfig().then(function (config) {
             if (config.token && config.username && !_marketplaceSyncRunning && !_wantSyncRunning) {
-                syncMarketplaceStats(config, true);
+                syncMarketplaceStats(true);
             }
         });
     }, 30 * 60 * 1000);
