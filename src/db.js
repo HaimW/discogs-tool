@@ -1,7 +1,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 7;
+var DB_VERSION = 8;
 var _db = null;
 
 function openDB() {
@@ -51,6 +51,16 @@ function openDB() {
             }
             if (!db.objectStoreNames.contains('marketplace_stats')) {
                 db.createObjectStore('marketplace_stats', { keyPath: 'id' });
+            }
+            if (!db.objectStoreNames.contains('store_items')) {
+                var sti = db.createObjectStore('store_items', { keyPath: 'id' });
+                sti.createIndex('serial', 'serial');
+                sti.createIndex('store_status', 'store_status');
+                sti.createIndex('batch_id', 'batch_id');
+            }
+            if (!db.objectStoreNames.contains('store_batches')) {
+                var sbatch = db.createObjectStore('store_batches', { keyPath: 'id', autoIncrement: true });
+                sbatch.createIndex('name', 'name');
             }
             if (!db.objectStoreNames.contains('notifications')) {
                 var ns = db.createObjectStore('notifications', { keyPath: 'id', autoIncrement: true });

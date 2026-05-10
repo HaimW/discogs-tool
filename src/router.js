@@ -35,6 +35,7 @@ function renderCurrentView() {
             case 'wantlist': renderWantList(); break;
             case 'setlists': renderSetlists(); break;
             case 'setlist': renderSetlist(_filters.setlistId); break;
+            case 'store': renderStore(); break;
             case 'backup': renderBackup(); break;
             default: renderCollection(); break;
         }
