@@ -404,31 +404,14 @@ async function storeRefreshPrice(releaseId) {
     if (cell) cell.innerHTML = '<span class="text-dim">...</span>';
     try {
         var config = await getConfig();
-        var allPrices = [];
-        var currency = null;
-        var page = 1;
 
-        while (true) {
-            var data = await discogsGet(
-                '/marketplace/search?release_id=' + releaseId +
-                '&per_page=100&sort=price&sort_order=asc&page=' + page,
-                config
-            );
-            var listings = data.results || [];
-            listings.forEach(function (l) {
-                if (l.price && l.price.value != null) {
-                    allPrices.push(l.price.value);
-                    if (!currency) currency = l.price.currency;
-                }
-            });
-            var totalPages = (data.pagination && data.pagination.pages) || 1;
-            if (page >= totalPages) break;
-            page++;
-            await sleep(1100);
-        }
+        // Use the authenticated stats endpoint — known working, no pagination needed.
+        // Returns lowest_price; also check for median_price / highest_price if Discogs adds them.
+        var data = await discogsGet('/marketplace/stats/' + releaseId, config);
 
-        var lowestPrice = allPrices.length ? Math.min.apply(null, allPrices) : null;
-        var highestPrice = allPrices.length > 1 ? Math.max.apply(null, allPrices) : null;
+        var lowestPrice  = data && data.lowest_price  ? data.lowest_price.value  : null;
+        var highestPrice = data && data.highest_price ? data.highest_price.value : null;
+        var currency     = data && data.lowest_price  ? data.lowest_price.currency : null;
 
         var item = await dbGet('store_items', releaseId);
         if (item) {
