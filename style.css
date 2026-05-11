@@ -1177,6 +1177,8 @@ a:hover { color: var(--accent-hover); }
 .td-batch { white-space: nowrap; }
 .td-actions { white-space: nowrap; }
 .td-actions .btn-sm, .td-actions a.btn-sm { margin-right: 4px; }
+.store-price-cell { padding: 0 !important; }
+.store-price-cell .wl-price-panel { border-top: none; border-bottom: 1px solid var(--border); }
 
 .badge-sold {
     display: inline-block; padding: 2px 8px; background: rgba(192,57,43,0.2);
