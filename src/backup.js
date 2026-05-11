@@ -18,8 +18,8 @@ function renderBackup() {
 
         '<div class="backup-card">' +
         '<div class="backup-card-icon">&#8659;</div>' +
-        '<h2 class="backup-card-title">Download backup</h2>' +
-        '<p class="backup-card-desc">Exports your setlists, track metadata (BPM, key, rating, notes…) and API config to a JSON file. Collection data is <em>not</em> included — it can always be re-synced from Discogs.</p>' +
+        '<h2 class="backup-card-title">Download full backup</h2>' +
+        '<p class="backup-card-desc">Exports your entire local database — collection, want list, setlists, track metadata, store inventory and API config — to a single JSON file. Everything needed to fully recover if you clear browser data.</p>' +
         '<button class="btn btn-primary btn-large" onclick="exportFullBackup()">Download vinyl-backup-&lt;date&gt;.json</button>' +
         '</div>' +
 
@@ -36,13 +36,13 @@ function renderBackup() {
         '<div class="backup-legend">' +
         '<h3>What is in the backup?</h3>' +
         '<ul>' +
+        '<li><strong>Collection</strong> &mdash; all releases, YouTube videos, folders and track lists</li>' +
+        '<li><strong>Want list</strong> &mdash; all wanted releases and their marketplace stats</li>' +
         '<li><strong>Setlists</strong> &mdash; all playlists with track order and notes</li>' +
         '<li><strong>Track metadata</strong> &mdash; BPM, key, rating, energy, shelf, tags, notes, verified flag</li>' +
+        '<li><strong>Store</strong> &mdash; serialized inventory items and sale batches</li>' +
         '<li><strong>Config</strong> &mdash; Discogs API token and username</li>' +
-        '</ul>' +
-        '<h3 style="margin-top:16px">What is NOT included?</h3>' +
-        '<ul>' +
-        '<li>Collection releases, videos, folders &mdash; re-sync from Discogs with one click after a restore</li>' +
+        '<li><strong>Notifications</strong> &mdash; marketplace alert history</li>' +
         '</ul>' +
         '</div>' +
 
@@ -52,26 +52,63 @@ function renderBackup() {
 function exportFullBackup() {
     Promise.all([
         dbGetAll('config'),
+        dbGetAll('releases'),
+        dbGetAll('videos'),
+        dbGetAll('folders'),
+        dbGetAll('tracklist'),
+        dbGetAll('wants'),
+        dbGetAll('marketplace_stats'),
         dbGetAll('track_meta'),
-        dbGetAll('setlists')
-    ]).then(function (results) {
+        dbGetAll('setlists'),
+        dbGetAll('store_items'),
+        dbGetAll('store_batches'),
+        dbGetAll('notifications')
+    ]).then(function (r) {
         var payload = {
-            _version: 1,
+            _version: 2,
             _app: 'VinylCollectionPlayer',
             exported_at: new Date().toISOString(),
-            config: results[0],
-            track_meta: results[1],
-            setlists: results[2]
+            config: r[0],
+            collection: {
+                releases: r[1],
+                videos: r[2],
+                folders: r[3],
+                tracklist: r[4]
+            },
+            wantlist: {
+                wants: r[5],
+                marketplace_stats: r[6]
+            },
+            track_meta: r[7],
+            setlists: r[8],
+            store: {
+                items: r[9],
+                batches: r[10]
+            },
+            notifications: r[11]
         };
         var date = new Date().toISOString().slice(0, 10);
         downloadBlob('vinyl-backup-' + date + '.json', 'application/json', JSON.stringify(payload, null, 2));
     });
 }
 
+// Write all records into a store in one transaction (efficient for large sets).
+function _bulkPut(storeName, records) {
+    if (!records || !records.length) return Promise.resolve(0);
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(storeName, 'readwrite');
+            var os = tx.objectStore(storeName);
+            records.forEach(function (rec) { os.put(rec); });
+            tx.oncomplete = function () { resolve(records.length); };
+            tx.onerror = function (e) { reject(e.target.error); };
+        });
+    });
+}
+
 function importBackupFile(input) {
     var file = input.files[0];
     if (!file) return;
-    // Reset so the same file can be chosen again
     input.value = '';
     var reader = new FileReader();
     reader.onload = function (e) {
@@ -86,22 +123,43 @@ function importBackupFile(input) {
             alert('This does not look like a valid Vinyl Collection Player backup file.');
             return;
         }
-        var setlists = backup.setlists || [];
-        var metas = backup.track_meta || [];
-        var configs = backup.config || [];
 
-        var promises = [];
-        configs.forEach(function (rec) { promises.push(dbPut('config', rec)); });
-        metas.forEach(function (rec) { promises.push(dbPut('track_meta', rec)); });
-        setlists.forEach(function (rec) { promises.push(dbPut('setlists', rec)); });
+        showSyncBanner('Restoring backup…');
 
-        Promise.all(promises).then(function () {
-            var msg = 'Restored: ' + setlists.length + ' setlist' + (setlists.length === 1 ? '' : 's') +
-                ', ' + metas.length + ' track metadata record' + (metas.length === 1 ? '' : 's');
+        var v = backup._version || 1;
+        var col = backup.collection || {};
+        var wl  = backup.wantlist  || {};
+        var st  = backup.store     || {};
+
+        Promise.all([
+            _bulkPut('config',            backup.config          || []),
+            _bulkPut('track_meta',        backup.track_meta      || []),
+            _bulkPut('setlists',          backup.setlists        || []),
+            _bulkPut('releases',          col.releases           || []),
+            _bulkPut('videos',            col.videos             || []),
+            _bulkPut('folders',           col.folders            || []),
+            _bulkPut('tracklist',         col.tracklist          || []),
+            _bulkPut('wants',             wl.wants               || []),
+            _bulkPut('marketplace_stats', wl.marketplace_stats   || []),
+            _bulkPut('store_items',       st.items               || []),
+            _bulkPut('store_batches',     st.batches             || []),
+            _bulkPut('notifications',     backup.notifications   || [])
+        ]).then(function (counts) {
+            var parts = [];
+            if (counts[3])  parts.push(counts[3]  + ' releases');
+            if (counts[4])  parts.push(counts[4]  + ' videos');
+            if (counts[7])  parts.push(counts[7]  + ' want list items');
+            if (counts[2])  parts.push(counts[2]  + ' setlist' + (counts[2] === 1 ? '' : 's'));
+            if (counts[1])  parts.push(counts[1]  + ' track metadata record' + (counts[1] === 1 ? '' : 's'));
+            if (counts[9])  parts.push(counts[9]  + ' store item' + (counts[9] === 1 ? '' : 's'));
+            if (counts[10]) parts.push(counts[10] + ' store batch' + (counts[10] === 1 ? '' : 'es'));
+            var msg = 'Restored' + (v > 1 ? ' (v' + v + ')' : '') + ': ' +
+                (parts.length ? parts.join(', ') : 'nothing to restore');
             showSyncBanner(msg);
-            setTimeout(hideSyncBanner, 3000);
-            renderCurrentView();  // refresh the backup page
+            setTimeout(hideSyncBanner, 5000);
+            renderCurrentView();
         }).catch(function (err) {
+            hideSyncBanner();
             alert('Restore failed: ' + err.message);
         });
     };
