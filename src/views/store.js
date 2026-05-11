@@ -411,10 +411,10 @@ async function storeRefreshPrice(releaseId) {
         while (true) {
             var data = await discogsGet(
                 '/marketplace/search?release_id=' + releaseId +
-                '&type=release&per_page=100&sort=price&sort_order=asc&page=' + page,
+                '&per_page=100&sort=price&sort_order=asc&page=' + page,
                 config
             );
-            var listings = data.listings || [];
+            var listings = data.results || [];
             listings.forEach(function (l) {
                 if (l.price && l.price.value != null) {
                     allPrices.push(l.price.value);
