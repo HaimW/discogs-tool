@@ -193,7 +193,8 @@ function renderStore() {
                 // Actions
                 html += '<td class="td-actions">';
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener" title="Open on Discogs">↗</a>';
-                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh lowest price">$ ↺</button>';
+                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh price range">$ ↺</button>';
+                html += '<button class="btn btn-sm" onclick="storePriceGuide(' + r.id + ')" title="Price suggestions by condition">$ Guide</button>';
                 if (r.store_status === 'active') {
                     html += '<button class="btn btn-sm btn-sold" onclick="storeMarkSoldModal(' + r.id + ')" title="Mark as sold">Sold</button>';
                 }
@@ -201,6 +202,10 @@ function renderStore() {
                 html += '</td>';
 
                 html += '</tr>';
+                html += '<tr id="store-price-row-' + r.id + '" style="display:none;">' +
+                    '<td colspan="11" class="store-price-cell">' +
+                    '<div id="store-price-panel-' + r.id + '" class="wl-price-panel"></div>' +
+                    '</td></tr>';
             });
 
             html += '</tbody></table></div>';
@@ -449,6 +454,50 @@ async function storeRefreshPrice(releaseId) {
         if (cell) cell.innerHTML = '<span class="text-dim">Error</span>';
         console.error('storeRefreshPrice error:', e);
     }
+}
+
+// ---- Price guide (condition-based suggestions) ----
+
+function storePriceGuide(releaseId) {
+    var row = document.getElementById('store-price-row-' + releaseId);
+    var panel = document.getElementById('store-price-panel-' + releaseId);
+    if (!row || !panel) return;
+
+    if (row.style.display !== 'none') {
+        row.style.display = 'none';
+        return;
+    }
+
+    panel.innerHTML = '<div class="wl-price-loading">Loading price guide…</div>';
+    row.style.display = '';
+
+    getConfig().then(function (config) {
+        discogsGet('/marketplace/price_suggestions/' + releaseId, config)
+            .then(function (data) {
+                var conditions = [
+                    'Mint (M)', 'Near Mint (NM or M-)', 'Very Good Plus (VG+)',
+                    'Very Good (VG)', 'Good Plus (G+)', 'Good (G)', 'Fair (F)', 'Poor (P)'
+                ];
+                var html = '<div class="wl-price-table">';
+                html += '<div class="wl-price-header">Price Guide by Condition</div>';
+                var hasData = false;
+                conditions.forEach(function (cond) {
+                    var entry = data[cond];
+                    if (!entry || !entry.value) return;
+                    hasData = true;
+                    html += '<div class="wl-price-row">';
+                    html += '<span class="wl-price-cond">' + escHtml(cond.split('(')[0].trim()) + '</span>';
+                    html += '<span class="wl-price-val">' + escHtml(entry.currency || '') + ' ' + Number(entry.value).toFixed(2) + '</span>';
+                    html += '</div>';
+                });
+                if (!hasData) html += '<div class="wl-price-empty">No price suggestions available for this release.</div>';
+                html += '</div>';
+                panel.innerHTML = html;
+            })
+            .catch(function () {
+                panel.innerHTML = '<div class="wl-price-empty">Could not load price guide.</div>';
+            });
+    });
 }
 
 // ---- Mark as sold ----
