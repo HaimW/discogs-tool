@@ -149,7 +149,7 @@ function renderStore() {
             html += '<thead><tr>' +
                 '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th>' +
                 '<th>Country</th><th>Style</th><th>Format</th>' +
-                '<th>Median $</th><th>Status</th><th>Batch</th><th>Actions</th>' +
+                '<th>Lowest $</th><th>Status</th><th>Batch</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
 
             filtered.forEach(function (r) {
@@ -192,7 +192,7 @@ function renderStore() {
                 // Actions
                 html += '<td class="td-actions">';
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener" title="Open on Discogs">↗</a>';
-                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh median price">$ ↺</button>';
+                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh lowest price">$ ↺</button>';
                 if (r.store_status === 'active') {
                     html += '<button class="btn btn-sm btn-sold" onclick="storeMarkSoldModal(' + r.id + ')" title="Mark as sold">Sold</button>';
                 }
@@ -391,8 +391,8 @@ async function storeRefreshPrice(releaseId) {
     if (cell) cell.innerHTML = '<span class="text-dim">...</span>';
     try {
         var data = await discogsGetPublic('/marketplace/stats/' + releaseId);
-        var price = data && data.median_price ? data.median_price.value : null;
-        var currency = data && data.median_price ? data.median_price.currency : null;
+        var price = data && data.lowest_price ? data.lowest_price.value : null;
+        var currency = data && data.lowest_price ? data.lowest_price.currency : null;
         var item = await dbGet('store_items', releaseId);
         if (item) {
             item.median_price = price;
@@ -654,10 +654,10 @@ function _openPrintWindow(storeItems, releases, batches, title) {
         '<h1>' + esc(title) + '</h1>' +
         '<div class="sub">' + esc(today) + ' &nbsp;·&nbsp; ' + rows.length + ' records</div>' +
         '<table><thead><tr>' +
-        '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th><th>Format</th><th>Median $</th><th>Status</th>' +
+        '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th><th>Format</th><th>Lowest $</th><th>Status</th>' +
         '</tr></thead><tbody>' + tableRows + '</tbody></table>' +
         '<div class="footer">Total records: ' + rows.length +
-        (totalMedian > 0 ? ' &nbsp;·&nbsp; Total median value: ' + Number(totalMedian).toFixed(2) : '') +
+        (totalMedian > 0 ? ' &nbsp;·&nbsp; Total lowest value: ' + Number(totalMedian).toFixed(2) : '') +
         '</div>' +
         '<script>window.onload=function(){window.print();};<\/script>' +
         '</body></html>';
