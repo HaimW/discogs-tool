@@ -150,7 +150,7 @@ function renderStore() {
             html += '<thead><tr>' +
                 '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th>' +
                 '<th>Country</th><th>Style</th><th>Format</th>' +
-                '<th>Price Range</th><th>Status</th><th>Batch</th><th>Actions</th>' +
+                '<th>Min Price</th><th>Status</th><th>Batch</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
 
             filtered.forEach(function (r) {
@@ -193,7 +193,7 @@ function renderStore() {
                 // Actions
                 html += '<td class="td-actions">';
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener" title="Open on Discogs">↗</a>';
-                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh price range">$ ↺</button>';
+                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh price">$ ↺</button>';
                 html += '<button class="btn btn-sm" onclick="storePriceGuide(' + r.id + ')" title="Price suggestions by condition">$ Guide</button>';
                 if (r.store_status === 'active') {
                     html += '<button class="btn btn-sm btn-sold" onclick="storeMarkSoldModal(' + r.id + ')" title="Mark as sold">Sold</button>';
