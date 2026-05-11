@@ -34,6 +34,7 @@ function renderStore() {
                 sold_price: item.sold_price || null,
                 batch_id: item.batch_id || null,
                 median_price: item.median_price || null,
+                highest_price: item.highest_price || null,
                 median_price_currency: item.median_price_currency || null,
                 median_price_updated_at: item.median_price_updated_at || null,
                 added_at: item.added_at || '',
@@ -149,7 +150,7 @@ function renderStore() {
             html += '<thead><tr>' +
                 '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th>' +
                 '<th>Country</th><th>Style</th><th>Format</th>' +
-                '<th>Lowest $</th><th>Status</th><th>Batch</th><th>Actions</th>' +
+                '<th>Price Range</th><th>Status</th><th>Batch</th><th>Actions</th>' +
                 '</tr></thead><tbody>';
 
             filtered.forEach(function (r) {
@@ -161,7 +162,7 @@ function renderStore() {
                     : '<span class="badge-active">Active</span>';
 
                 var priceHtml = r.median_price
-                    ? escHtml((r.median_price_currency || '') + ' ' + Number(r.median_price).toFixed(2))
+                    ? escHtml(_formatPriceRange(r.median_price, r.highest_price, r.median_price_currency))
                     : '<span class="text-dim">—</span>';
 
                 html += '<tr class="store-row' + (r.store_status === 'sold' ? ' store-row-sold' : '') + '">';
@@ -384,31 +385,69 @@ function storeCancelEditSerial(releaseId, originalSerial) {
         '<button class="btn-icon" title="Edit serial" onclick="storeBeginEditSerial(' + releaseId + ',\'' + escJs(originalSerial) + '\')">✎</button>';
 }
 
-// ---- Median price refresh ----
+// ---- Price range refresh ----
+
+function _formatPriceRange(low, high, currency) {
+    var curr = currency || '';
+    var str = curr + ' ' + Number(low).toFixed(2);
+    if (high != null && high > low) str += ' – ' + Number(high).toFixed(2);
+    return str.trim();
+}
 
 async function storeRefreshPrice(releaseId) {
     var cell = document.getElementById('median-cell-' + releaseId);
     if (cell) cell.innerHTML = '<span class="text-dim">...</span>';
     try {
-        var data = await discogsGetPublic('/marketplace/stats/' + releaseId);
-        var price = data && data.lowest_price ? data.lowest_price.value : null;
-        var currency = data && data.lowest_price ? data.lowest_price.currency : null;
+        var config = await getConfig();
+        var allPrices = [];
+        var currency = null;
+        var page = 1;
+
+        while (true) {
+            var data = await discogsGet(
+                '/marketplace/search?release_id=' + releaseId +
+                '&type=release&per_page=100&sort=price&sort_order=asc&page=' + page,
+                config
+            );
+            var listings = data.listings || [];
+            listings.forEach(function (l) {
+                if (l.price && l.price.value != null) {
+                    allPrices.push(l.price.value);
+                    if (!currency) currency = l.price.currency;
+                }
+            });
+            var totalPages = (data.pagination && data.pagination.pages) || 1;
+            if (page >= totalPages) break;
+            page++;
+            await sleep(1100);
+        }
+
+        var lowestPrice = allPrices.length ? Math.min.apply(null, allPrices) : null;
+        var highestPrice = allPrices.length > 1 ? Math.max.apply(null, allPrices) : null;
+
         var item = await dbGet('store_items', releaseId);
         if (item) {
-            item.median_price = price;
+            item.median_price = lowestPrice;
+            item.highest_price = highestPrice;
             item.median_price_currency = currency;
             item.median_price_updated_at = new Date().toISOString();
             await dbPut('store_items', item);
             var cached = _storeItemsCache.find(function (i) { return i.id === releaseId; });
-            if (cached) { cached.median_price = price; cached.median_price_currency = currency; }
+            if (cached) {
+                cached.median_price = lowestPrice;
+                cached.highest_price = highestPrice;
+                cached.median_price_currency = currency;
+            }
         }
+
         if (cell) {
-            cell.innerHTML = price
-                ? escHtml((currency || '') + ' ' + Number(price).toFixed(2))
+            cell.innerHTML = lowestPrice != null
+                ? escHtml(_formatPriceRange(lowestPrice, highestPrice, currency))
                 : '<span class="text-dim">—</span>';
         }
     } catch (e) {
         if (cell) cell.innerHTML = '<span class="text-dim">Error</span>';
+        console.error('storeRefreshPrice error:', e);
     }
 }
 
@@ -611,6 +650,7 @@ function _openPrintWindow(storeItems, releases, batches, title) {
                 year: rel.year || '',
                 format: rel.format || '',
                 median_price: item.median_price,
+                highest_price: item.highest_price || null,
                 median_price_currency: item.median_price_currency,
                 store_status: item.store_status || 'active'
             };
@@ -621,7 +661,7 @@ function _openPrintWindow(storeItems, releases, batches, title) {
     var today = new Date().toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
 
     var tableRows = rows.map(function (r) {
-        var price = r.median_price ? (r.median_price_currency || '') + ' ' + Number(r.median_price).toFixed(2) : '—';
+        var price = r.median_price ? _formatPriceRange(r.median_price, r.highest_price, r.median_price_currency) : '—';
         var sold = r.store_status === 'sold' ? ' [SOLD]' : '';
         return '<tr>' +
             '<td>' + esc(r.serial) + '</td>' +
@@ -654,7 +694,7 @@ function _openPrintWindow(storeItems, releases, batches, title) {
         '<h1>' + esc(title) + '</h1>' +
         '<div class="sub">' + esc(today) + ' &nbsp;·&nbsp; ' + rows.length + ' records</div>' +
         '<table><thead><tr>' +
-        '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th><th>Format</th><th>Lowest $</th><th>Status</th>' +
+        '<th>Serial</th><th>Artist</th><th>Title</th><th>Year</th><th>Format</th><th>Price Range</th><th>Status</th>' +
         '</tr></thead><tbody>' + tableRows + '</tbody></table>' +
         '<div class="footer">Total records: ' + rows.length +
         (totalMedian > 0 ? ' &nbsp;·&nbsp; Total lowest value: ' + Number(totalMedian).toFixed(2) : '') +
