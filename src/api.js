@@ -1,15 +1,65 @@
 // ============ Discogs API ============
 
+// ---------------------------------------------------------------------------
+// Adaptive rate limiter
+//
+// Discogs uses a 60-second sliding-window token bucket:
+//   authenticated  → 60 req / 60 s
+//   unauthenticated → 25 req / 60 s
+//
+// After every successful response we read the X-Discogs-Ratelimit-* headers
+// and store them in _rl.  Before every request we call _rlDelay() which
+// returns the minimum safe wait time based on current headroom.
+//
+// The formula accounts for token replenishment: if `elapsed` milliseconds
+// have passed since the last header read, roughly (elapsed/60000)*limit
+// tokens have refilled.  We then spread the effective remaining quota evenly
+// over the rest of the window:
+//
+//   effective = min(remaining + (elapsed/60000)*limit, limit)
+//   delay     = max(MIN_MS, round(60000 / effective))
+//
+// Examples (auth bucket, limit=60, no elapsed time):
+//   remaining=60 → delay=1000ms   remaining=20 → delay=3000ms
+//   remaining=10 → delay=6000ms   remaining= 2 → delay=15000ms (hard cap)
+// ---------------------------------------------------------------------------
+
+var _rl = {
+    auth:   { limit: 60, remaining: null, updatedAt: 0 },
+    public: { limit: 25, remaining: null, updatedAt: 0 }
+};
+
+function _rlUpdate(bucket, headers) {
+    var limit     = parseInt(headers.get('X-Discogs-Ratelimit'), 10);
+    var remaining = parseInt(headers.get('X-Discogs-Ratelimit-Remaining'), 10);
+    if (Number.isFinite(remaining)) {
+        if (Number.isFinite(limit)) bucket.limit = limit;
+        bucket.remaining = remaining;
+        bucket.updatedAt = Date.now();
+        console.debug('[rl] remaining=' + remaining + '/' + bucket.limit);
+    }
+}
+
+function _rlDelay(bucket) {
+    if (bucket.remaining === null) return 1000;  // no data yet — safe default
+    if (bucket.remaining <= 1)    return 15000;  // nearly exhausted
+
+    var elapsed   = Math.min(Date.now() - bucket.updatedAt, 60000);
+    var effective = Math.min(bucket.remaining + (elapsed / 60000) * bucket.limit, bucket.limit);
+    return Math.max(200, Math.round(60000 / effective));
+}
+
 async function discogsGet(path, config, _retries) {
     if (_retries === undefined) _retries = 3;
-    var headers = {
-        'Authorization': 'Discogs token=' + config.token
-    };
+
+    await sleep(_rlDelay(_rl.auth));
+
+    var headers = { 'Authorization': 'Discogs token=' + config.token };
     var r;
     try {
         r = await fetch('https://api.discogs.com' + path, { headers: headers });
     } catch (err) {
-        // Network error or CORS block (429 without CORS headers shows up here)
+        // Network error or CORS block (a 429 without CORS headers lands here)
         if (_retries <= 0) throw err;
         var backoff = [5, 15, 30][3 - _retries] || 5;
         console.warn('Request failed on ' + path + ', backing off ' + backoff + 's (retries left: ' + (_retries - 1) + ')');
@@ -18,11 +68,13 @@ async function discogsGet(path, config, _retries) {
         return discogsGet(path, config, _retries - 1);
     }
 
-    // Explicit 429
     if (r.status === 429) {
         if (_retries <= 0) throw new Error('Rate limited after retries');
         var _retryAfter = parseInt(r.headers.get('Retry-After'), 10);
         var wait = (Number.isFinite(_retryAfter) && _retryAfter > 0 ? _retryAfter : 30) * 1000;
+        // Mark bucket as exhausted so _rlDelay recovers gradually after the wait.
+        _rl.auth.remaining = 0;
+        _rl.auth.updatedAt = Date.now();
         console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
@@ -31,14 +83,7 @@ async function discogsGet(path, config, _retries) {
 
     if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
 
-    // Proactive back-off when close to limit
-    var remaining = r.headers.get('X-Discogs-Ratelimit-Remaining');
-    if (remaining !== null && parseInt(remaining) < 5) {
-        console.warn('Rate limit low (' + remaining + '), sleeping 10s...');
-        showSyncBanner('Rate limit low, pausing 10s...');
-        await sleep(10000);
-    }
-
+    _rlUpdate(_rl.auth, r.headers);
     return r.json();
 }
 
@@ -96,6 +141,9 @@ function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 // as a simple CORS request (no preflight required).
 async function discogsGetPublic(path, _retries) {
     if (_retries === undefined) _retries = 3;
+
+    await sleep(_rlDelay(_rl.public));
+
     var r;
     try {
         r = await fetch('https://api.discogs.com' + path);
@@ -112,6 +160,8 @@ async function discogsGetPublic(path, _retries) {
         if (_retries <= 0) throw new Error('Rate limited after retries');
         var _retryAfter = parseInt(r.headers.get('Retry-After'), 10);
         var wait = (Number.isFinite(_retryAfter) && _retryAfter > 0 ? _retryAfter : 60) * 1000;
+        _rl.public.remaining = 0;
+        _rl.public.updatedAt = Date.now();
         console.warn('429 on ' + path + ', waiting ' + (wait / 1000) + 's...');
         showSyncBanner('Rate limited — waiting ' + (wait / 1000) + 's...');
         await sleep(wait);
@@ -119,6 +169,7 @@ async function discogsGetPublic(path, _retries) {
     }
 
     if (!r.ok) throw new Error('Discogs API ' + r.status + ' on ' + path);
+    _rlUpdate(_rl.public, r.headers);
     return r.json();
 }
 
@@ -260,11 +311,6 @@ async function syncVideosInBackground(config) {
         if (done % rerenderEvery === 0 && _currentView === 'collection') {
             renderCollection();
         }
-
-        // Pace Phase 2: each request with Authorization header triggers CORS
-        // preflight (OPTIONS + GET = 2 HTTP calls). 1.1s gap keeps us just
-        // under the 60 req/min Discogs limit with a small safety margin.
-        if (vi < unsynced.length - 1) await sleep(1100);
     }
 
     showSyncBanner('Sync complete!');
@@ -324,7 +370,6 @@ async function fetchFolderReleases(config, folderId, allReleases, tagFolderId, s
 
         if (page >= totalPages) break;
         page++;
-        await sleep(1000);
     }
 }
 
