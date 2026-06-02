@@ -33,6 +33,7 @@ function onYouTubeIframeAPIReady() {
                 _restorePlayerState();
             },
             onStateChange: onPlayerStateChange,
+            onError: onPlayerError,
         },
     });
     player2 = new YT.Player('player2-container', {
@@ -42,6 +43,7 @@ function onYouTubeIframeAPIReady() {
         events: {
             onReady: function () { player2Ready = true; },
             onStateChange: onPlayer2StateChange,
+            onError: function () { _abortCrossfade(); },
         },
     });
 }
@@ -84,6 +86,21 @@ function onPlayerStateChange(event) {
         stopViz();
         updatePlayPauseBtn();
         _savePlayerState();
+    }
+}
+
+function onPlayerError(event) {
+    // error codes 100/101/150 = video removed or not embeddable; 2 = bad ID
+    console.warn('YouTube player error', event.data, 'on track index', currentIndex);
+    if (_cfState === 'fading' || _cfState === 'switching') _abortCrossfade();
+    if (currentIndex < currentQueue.length - 1) {
+        currentIndex++;
+        loadFromQueue(currentIndex);
+        if (document.getElementById('queue-panel')) _renderQueuePanel();
+    } else {
+        isPlaying = false;
+        stopViz();
+        updatePlayPauseBtn();
     }
 }
 
