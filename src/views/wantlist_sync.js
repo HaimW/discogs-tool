@@ -78,7 +78,6 @@ async function syncWantList(config) {
         showSyncBanner('Want list: page ' + page + '/' + totalPages);
         if (page >= totalPages) break;
         page++;
-        await sleep(1000);
     }
 
     var ids = Object.keys(allWants);
@@ -145,7 +144,6 @@ async function syncWantListVideosInBackground(config) {
             console.error('Error fetching want release ' + want.id + ':', err);
         }
         if (done % 5 === 0 && _currentView === 'wantlist') renderWantList();
-        if (vi < unsynced.length - 1) await sleep(1100);
     }
 
     showSyncBanner('Want list sync complete!');
@@ -155,8 +153,11 @@ async function syncWantListVideosInBackground(config) {
     var btn = document.getElementById('wl-sync-btn');
     if (btn) btn.disabled = false;
 
-    // Kick off marketplace availability check silently after full sync
-    syncMarketplaceStats(true, config).catch(function (err) {
-        console.error('Marketplace stats sync failed:', err);
-    });
+    // Kick off marketplace availability check silently after full sync,
+    // but only if collection sync isn't also running (shared rate-limit bucket).
+    if (!_syncRunning) {
+        syncMarketplaceStats(true, config).catch(function (err) {
+            console.error('Marketplace stats sync failed:', err);
+        });
+    }
 }

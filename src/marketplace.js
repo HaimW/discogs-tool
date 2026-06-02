@@ -71,8 +71,6 @@ async function syncMarketplaceStats(silent, config) {
             } catch (err) {
                 console.error('Marketplace stats error for ' + w.id + ':', err);
             }
-            // Authenticated requests are capped at 60 req/min; 1.1s keeps us safely under.
-            if (i < toCheck.length - 1) await sleep(1100);
         }
 
         if (_currentView === 'wantlist') renderWantList();
