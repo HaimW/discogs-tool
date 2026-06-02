@@ -26,7 +26,7 @@ function onYouTubeIframeAPIReady() {
     player = new YT.Player('player-container', {
         height: '270',
         width: '480',
-        playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0 },
+        playerVars: { autoplay: 0, controls: 1, rel: 0, enablejsapi: 1, origin: window.location.origin, playsinline: 1, cc_load_policy: 0 },
         events: {
             onReady: function () {
                 playerReady = true;
@@ -39,7 +39,7 @@ function onYouTubeIframeAPIReady() {
     player2 = new YT.Player('player2-container', {
         height: '1',
         width: '1',
-        playerVars: { autoplay: 0, controls: 0, modestbranding: 1, rel: 0 },
+        playerVars: { autoplay: 0, controls: 0, rel: 0, enablejsapi: 1, origin: window.location.origin, playsinline: 1, cc_load_policy: 0 },
         events: {
             onReady: function () { player2Ready = true; },
             onStateChange: onPlayer2StateChange,
