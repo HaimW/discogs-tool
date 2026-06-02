@@ -24,8 +24,8 @@ document.head.appendChild(ytTag);
 
 function onYouTubeIframeAPIReady() {
     player = new YT.Player('player-container', {
-        height: '270',
-        width: '480',
+        height: '200',
+        width: '356',
         playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0 },
         events: {
             onReady: function () {

@@ -50,7 +50,7 @@
             </div>
         </div>
         <div class="np-visualizer" id="np-visualizer">
-            <canvas id="viz-canvas" width="360" height="200"></canvas>
+            <canvas id="viz-canvas" width="360" height="120"></canvas>
             <div class="viz-switcher">
                 <button class="viz-btn active" data-viz="bars"      title="Spectrum Bars">▰▰▰</button>
                 <button class="viz-btn"        data-viz="wave"      title="Plasma Wave">∿</button>
@@ -62,26 +62,24 @@
                 <button class="viz-btn"        data-viz="tunnel"    title="Neon Tunnel">⊡</button>
             </div>
         </div>
-        <div class="np-player-section">
-            <div class="np-player">
-                <div id="player-container"></div>
-                <div id="player2-container" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
+        <div class="np-player">
+            <div id="player-container"></div>
+            <div id="player2-container" style="position:absolute;left:-9999px;top:-9999px;width:1px;height:1px;overflow:hidden;" aria-hidden="true"></div>
+        </div>
+        <div class="np-controls">
+            <div class="np-transport">
+                <button id="np-prev"       class="np-btn np-btn-skip" title="Previous track">&#9664;&#9664;</button>
+                <button id="np-play-pause" class="np-btn np-btn-main" title="Play / Pause">&#9654;</button>
+                <button id="np-next"       class="np-btn np-btn-skip" title="Next track">&#9654;&#9654;</button>
             </div>
-            <div class="np-controls">
-                <div class="np-transport">
-                    <button id="np-prev"       class="np-btn np-btn-skip" title="Previous track">&#9664;&#9664;</button>
-                    <button id="np-play-pause" class="np-btn np-btn-main" title="Play / Pause">&#9654;</button>
-                    <button id="np-next"       class="np-btn np-btn-skip" title="Next track">&#9654;&#9654;</button>
-                </div>
-                <div class="np-actions">
-                    <button id="np-queue"        class="np-btn" title="Queue">&#9776;</button>
-                    <button id="np-add-setlist"  class="np-btn" title="Save to setlist">&#9733;</button>
-                    <button id="np-goto-release" class="np-btn np-btn-icon" title="Go to release page">&#8599;</button>
-                    <button id="np-suggest"      class="np-btn" title="Suggest next track">&#8764;</button>
-                    <button id="np-cf-toggle"    class="np-btn" title="Toggle crossfade">CF: OFF</button>
-                    <input id="np-cf-seconds" class="np-cf-input" type="number" min="1" max="30" value="5" title="Crossfade duration (sec)" style="display:none;">
-                    <button id="np-close"        class="np-btn np-btn-close" title="Stop playback">&times;</button>
-                </div>
+            <div class="np-actions">
+                <button id="np-queue"        class="np-btn" title="Queue">&#9776;</button>
+                <button id="np-add-setlist"  class="np-btn" title="Save to setlist">&#9733;</button>
+                <button id="np-goto-release" class="np-btn np-btn-icon" title="Go to release page">&#8599;</button>
+                <button id="np-suggest"      class="np-btn" title="Suggest next track">&#8764;</button>
+                <button id="np-cf-toggle"    class="np-btn" title="Toggle crossfade">CF: OFF</button>
+                <input id="np-cf-seconds" class="np-cf-input" type="number" min="1" max="30" value="5" title="Crossfade duration (sec)" style="display:none;">
+                <button id="np-close"        class="np-btn np-btn-close" title="Stop playback">&times;</button>
             </div>
         </div>
     </div>
