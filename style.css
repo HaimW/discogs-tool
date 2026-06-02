@@ -360,77 +360,118 @@ a:hover { color: var(--accent-hover); }
 
 .now-playing {
     position: fixed; bottom: 0; left: 0; right: 0;
-    height: auto; min-height: 340px;
-    background: rgba(10, 10, 10, 0.95); backdrop-filter: blur(20px);
-    border-top: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 20px; z-index: 200; gap: 16px;
-    overflow: hidden;
+    background: rgba(10, 10, 14, 0.97);
+    backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+    border-top: 1px solid rgba(255,255,255,0.07);
+    display: flex; flex-direction: column;
+    z-index: 200;
+    box-shadow: 0 -8px 40px rgba(0,0,0,0.6);
 }
 
-.np-info { display: flex; align-items: center; gap: 12px; min-width: 140px; flex: 1; }
-.np-cover { width: 60px; height: 60px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+/* Thin seekable progress bar across the top edge */
+.np-progress-track {
+    height: 3px; background: rgba(255,255,255,0.07);
+    cursor: pointer; flex-shrink: 0; position: relative;
+    transition: height 0.2s;
+}
+.np-progress-track:hover { height: 5px; }
+.np-progress-fill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent) 0%, #f5d060 100%);
+    border-radius: 0 2px 2px 0;
+    transition: width 0.5s linear;
+    position: relative;
+}
+.np-progress-fill::after {
+    content: ''; position: absolute; right: -5px; top: 50%;
+    transform: translateY(-50%) scale(0);
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #fff; box-shadow: 0 0 6px rgba(255,255,255,0.5);
+    transition: transform 0.15s;
+}
+.np-progress-track:hover .np-progress-fill::after { transform: translateY(-50%) scale(1); }
+
+/* Main row — three columns */
+.np-main-row {
+    display: flex; align-items: center;
+    padding: 0 20px; height: 72px; gap: 12px;
+}
+
+/* Left: album art + track info */
+.np-info { display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0; }
+.np-cover {
+    width: 50px; height: 50px; border-radius: 5px; object-fit: cover; flex-shrink: 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
 .np-text { min-width: 0; }
-.np-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-artist { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-player-section { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
-.np-player { flex-shrink: 0; overflow: hidden; }
-.np-player iframe { border-radius: 4px; max-width: 100%; }
-.np-controls { display: flex; align-items: center; gap: 12px; justify-content: center; }
-
-.np-transport {
-    display: flex; align-items: center; gap: 10px;
-    padding: 0 16px;
-    border-left: 1px solid var(--border);
-    border-right: 1px solid var(--border);
+.np-title {
+    font-size: 13px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text);
 }
-.np-actions {
-    display: flex; align-items: center; gap: 4px;
+.np-artist {
+    font-size: 11px; color: var(--text-muted); margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* Center: transport */
+.np-center { display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.np-transport { display: flex; align-items: center; gap: 8px; }
+
+/* Right: action buttons */
+.np-right { display: flex; align-items: center; justify-content: flex-end; flex: 1; min-width: 0; }
+.np-actions { display: flex; align-items: center; gap: 2px; }
+
+/* Buttons */
 .np-btn {
-    background: none; border: 1px solid var(--border); color: var(--text-muted);
-    width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 13px; transition: all 0.2s; flex-shrink: 0;
+    background: none; border: none; color: var(--text-muted);
+    width: 32px; height: 32px; border-radius: 50%;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; transition: all 0.15s; flex-shrink: 0;
 }
-.np-btn:hover { border-color: var(--accent); color: var(--accent); }
-.np-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
-.np-btn-skip { font-size: 10px; color: var(--text-dim); }
-.np-btn-main { width: 44px; height: 44px; border-color: var(--accent); color: var(--accent); font-size: 15px; }
-.np-btn-main:hover { background: var(--accent); color: #000; }
-.np-btn-close { font-size: 17px; border-color: transparent; margin-left: 4px; }
-.np-btn-close:hover { border-color: var(--danger); color: var(--danger); background: none; }
-.np-btn-icon { font-size: 15px; font-weight: 700; }
+.np-btn:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+.np-btn.active { color: var(--accent); background: rgba(212,160,38,0.12); }
+.np-btn-skip { color: var(--text-dim); font-size: 10px; }
+.np-btn-main {
+    width: 40px; height: 40px;
+    background: var(--accent); color: #000;
+    font-size: 14px; border-radius: 50%;
+}
+.np-btn-main:hover { background: #f5d060; transform: scale(1.07); }
+.np-btn-close { color: var(--text-dim); font-size: 15px; }
+.np-btn-close:hover { color: var(--danger); background: rgba(255,60,60,0.1); }
+.np-btn-icon { font-size: 14px; font-weight: 700; }
 
 /* ============ VISUALIZER ============ */
 
 .np-visualizer {
-    display: flex; flex-direction: column; align-items: center;
-    gap: 6px; flex-shrink: 1; min-width: 0;
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    background: rgba(10,10,14,0.97);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-bottom: none; border-radius: 12px 12px 0 0;
+    padding: 14px 14px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.5);
 }
 #viz-canvas {
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.6);
-    border: 1px solid #1a1a2e;
-    display: block;
-    max-width: 100%;
+    border-radius: 8px; background: rgba(0,0,0,0.7);
+    border: 1px solid rgba(255,255,255,0.05);
+    display: block; max-width: 100%;
 }
 .viz-switcher { display: flex; gap: 4px; }
 .viz-btn {
-    min-width: 44px; height: 22px;
+    min-width: 40px; height: 22px;
     border: 1px solid #333; border-radius: 4px;
     background: none; color: #555; cursor: pointer;
-    font-size: 10px; letter-spacing: 1px;
-    transition: all 0.15s;
+    font-size: 10px; letter-spacing: 1px; transition: all 0.15s;
 }
-.viz-btn:hover  { border-color: #00e5ff; color: #00e5ff; }
-.viz-btn.active { border-color: #00e5ff; color: #00e5ff; background: rgba(0, 229, 255, 0.1); }
+.viz-btn:hover  { border-color: var(--accent); color: var(--accent); }
+.viz-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(212,160,38,0.1); }
 
 /* ============ CROSSFADE CONTROLS ============ */
 
 .np-cf-input {
-    width: 46px; height: 36px;
+    width: 42px; height: 30px;
     background: none; border: 1px solid var(--border);
     border-radius: var(--radius-sm); color: var(--text);
     font-family: var(--font-mono); font-size: 12px;
@@ -446,7 +487,7 @@ a:hover { color: var(--accent-hover); }
 
 .suggestions-panel {
     position: fixed;
-    left: 20px; right: 20px; bottom: 220px;
+    left: 20px; right: 20px; bottom: 84px;
     max-width: 720px; margin: 0 auto;
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -486,14 +527,14 @@ a:hover { color: var(--accent-hover); }
 }
 
 @media (max-width: 768px) {
-    .suggestions-panel { bottom: 160px; left: 8px; right: 8px; }
+    .suggestions-panel { bottom: 84px; left: 8px; right: 8px; }
 }
 
 /* ============ QUEUE PANEL ============ */
 
 .queue-panel {
     position: fixed;
-    right: 20px; bottom: 220px;
+    right: 20px; bottom: 84px;
     width: 360px; max-width: calc(100vw - 40px);
     background: var(--bg-card); border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -534,7 +575,7 @@ a:hover { color: var(--accent-hover); }
 .queue-play-btn, .queue-remove-btn { padding: 4px 8px !important; font-size: 11px !important; }
 
 @media (max-width: 768px) {
-    .queue-panel { right: 8px; left: 8px; width: auto; bottom: 160px; }
+    .queue-panel { right: 8px; left: 8px; width: auto; bottom: 84px; }
 }
 
 /* ============ TRACKS VIEW ============ */

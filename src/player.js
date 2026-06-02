@@ -61,6 +61,7 @@ function onPlayerStateChange(event) {
         } else {
             isPlaying = false;
             stopViz();
+            _stopProgressUpdate();
             updatePlayPauseBtn();
         }
     } else if (event.data === YT.PlayerState.PLAYING) {
@@ -79,11 +80,13 @@ function onPlayerStateChange(event) {
         }
         isPlaying = true;
         startViz();
+        _startProgressUpdate();
         updatePlayPauseBtn();
         _savePlayerState();
     } else if (event.data === YT.PlayerState.PAUSED) {
         isPlaying = false;
         stopViz();
+        _stopProgressUpdate();
         updatePlayPauseBtn();
         _savePlayerState();
     }
@@ -117,7 +120,8 @@ function showNowPlaying(title, artist, coverUrl) {
     if (coverUrl) { cover.src = coverUrl; cover.style.display = 'block'; }
     else { cover.style.display = 'none'; }
     bar.style.display = 'flex';
-    document.body.style.paddingBottom = '220px';
+    document.body.style.paddingBottom = '84px';
+    _resetProgress();
     highlightActiveTrack();
 }
 
@@ -293,5 +297,36 @@ function shufflePlay(limitOverride) {
 
 function shufflePlayAll() {
     shufflePlay(Infinity);
+}
+
+// ---- Progress bar ----
+
+var _progressInterval = null;
+
+function _startProgressUpdate() {
+    if (_progressInterval) return;
+    _progressInterval = setInterval(function () {
+        if (!player || !playerReady) return;
+        try {
+            var dur = player.getDuration();
+            var cur = player.getCurrentTime();
+            if (!dur) return;
+            var fill = document.getElementById('np-progress-fill');
+            if (fill) fill.style.width = ((cur / dur) * 100) + '%';
+        } catch (e) {}
+    }, 500);
+}
+
+function _stopProgressUpdate() {
+    if (_progressInterval) { clearInterval(_progressInterval); _progressInterval = null; }
+}
+
+function _resetProgress() {
+    _stopProgressUpdate();
+    var fill = document.getElementById('np-progress-fill');
+    if (fill) { fill.style.transition = 'none'; fill.style.width = '0%'; }
+    setTimeout(function () {
+        if (fill) fill.style.transition = '';
+    }, 50);
 }
 
