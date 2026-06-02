@@ -133,7 +133,7 @@ a:hover { color: var(--accent-hover); }
 
 /* ============ CONTENT ============ */
 
-.content { max-width: 1400px; margin: 0 auto; padding: 24px; }
+.content { max-width: 1400px; margin: 0 auto; padding: 24px 24px 380px; }
 
 /* ============ SETUP PAGE ============ */
 
@@ -360,7 +360,7 @@ a:hover { color: var(--accent-hover); }
 
 .now-playing {
     position: fixed; bottom: 0; left: 0; right: 0;
-    height: auto; min-height: 80px;
+    height: auto; min-height: 340px;
     background: rgba(10, 10, 10, 0.95); backdrop-filter: blur(20px);
     border-top: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
@@ -373,9 +373,10 @@ a:hover { color: var(--accent-hover); }
 .np-text { min-width: 0; }
 .np-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-artist { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-player { flex-shrink: 1; min-width: 0; overflow: hidden; }
+.np-player-section { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 1; min-width: 0; }
+.np-player { flex-shrink: 0; overflow: hidden; }
 .np-player iframe { border-radius: 4px; max-width: 100%; }
-.np-controls { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.np-controls { display: flex; align-items: center; gap: 12px; justify-content: center; }
 
 .np-transport {
     display: flex; align-items: center; gap: 10px;
