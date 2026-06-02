@@ -4,6 +4,20 @@ document.addEventListener('DOMContentLoaded', function () {
     _saveInterval = setInterval(function () { if (isPlaying) _savePlayerState(); }, 2000);
 
     document.getElementById('np-close').addEventListener('click', hideNowPlaying);
+
+    document.getElementById('np-progress-track').addEventListener('click', function (e) {
+        if (!player || !playerReady) return;
+        var rect = this.getBoundingClientRect();
+        var pct = (e.clientX - rect.left) / rect.width;
+        try { var dur = player.getDuration(); if (dur) player.seekTo(pct * dur, true); } catch (ex) {}
+    });
+
+    document.getElementById('np-viz-toggle').addEventListener('click', function () {
+        var viz = document.getElementById('np-visualizer');
+        var show = viz.style.display === 'none';
+        viz.style.display = show ? 'flex' : 'none';
+        this.classList.toggle('active', show);
+    });
     document.getElementById('np-play-pause').addEventListener('click', function () {
         if (!player || !playerReady) return;
         if (isPlaying) player.pauseVideo(); else player.playVideo();
