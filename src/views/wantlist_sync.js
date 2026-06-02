@@ -155,8 +155,11 @@ async function syncWantListVideosInBackground(config) {
     var btn = document.getElementById('wl-sync-btn');
     if (btn) btn.disabled = false;
 
-    // Kick off marketplace availability check silently after full sync
-    syncMarketplaceStats(true, config).catch(function (err) {
-        console.error('Marketplace stats sync failed:', err);
-    });
+    // Kick off marketplace availability check silently after full sync,
+    // but only if collection sync isn't also running (shared rate-limit bucket).
+    if (!_syncRunning) {
+        syncMarketplaceStats(true, config).catch(function (err) {
+            console.error('Marketplace stats sync failed:', err);
+        });
+    }
 }
