@@ -35,7 +35,7 @@ function startAvailabilityCheck() {
         if (!config.token || !config.username) { navigate('setup'); return; }
         var btn = document.getElementById('wl-avail-btn');
         if (btn) btn.disabled = true;
-        syncMarketplaceStats(false).then(function () {
+        syncMarketplaceStats(false, config).then(function () {
             if (btn) btn.disabled = false;
         });
     });
@@ -156,7 +156,7 @@ async function syncWantListVideosInBackground(config) {
     if (btn) btn.disabled = false;
 
     // Kick off marketplace availability check silently after full sync
-    syncMarketplaceStats(true).catch(function (err) {
+    syncMarketplaceStats(true, config).catch(function (err) {
         console.error('Marketplace stats sync failed:', err);
     });
 }
