@@ -12,6 +12,18 @@
     <div class="bg-layer" aria-hidden="true">
         <video src="A_dark_atmospheric_digital_ar.mp4" autoplay loop muted playsinline id="bg-video"></video>
     </div>
+    <script>
+        const bgVideo = document.getElementById('bg-video');
+        const bgLayer = bgVideo.closest('.bg-layer');
+        const bgToggleBtn = document.getElementById('bg-toggle-btn');
+        bgVideo.playbackRate = 0.5;
+        bgToggleBtn.classList.add('active');
+        bgToggleBtn.addEventListener('click', () => {
+            const isOff = bgLayer.classList.toggle('bg-off');
+            bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
+            bgToggleBtn.classList.toggle('active', !isOff);
+        });
+    </script>
     <nav class="top-nav">
         <a href="#" class="nav-brand" id="nav-brand" data-nav="collection">
             <span class="vinyl-icon">&#9898;</span>
