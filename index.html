@@ -144,5 +144,17 @@
     <script src="src/views/tracks.js"></script>
     <script src="src/views/release.js"></script>
     <script src="src/init.js"></script>
+    <script>
+        const bgVideo = document.getElementById('bg-video');
+        const bgLayer = bgVideo.closest('.bg-layer');
+        const bgToggleBtn = document.getElementById('bg-toggle-btn');
+        bgVideo.playbackRate = 0.75;
+        bgToggleBtn.classList.add('active');
+        bgToggleBtn.addEventListener('click', () => {
+            const isOff = bgLayer.classList.toggle('bg-off');
+            bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
+            bgToggleBtn.classList.toggle('active', !isOff);
+        });
+    </script>
 </body>
 </html>
