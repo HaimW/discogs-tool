@@ -58,7 +58,6 @@ body {
 .bg-layer.bg-off::after { opacity: 0; }
 
 body { transition: background 0.4s; }
-body:has(.bg-layer.bg-off) { background: var(--bg); }
 
 .btn-bg-toggle { font-size: 11px; padding: 8px 10px; opacity: 0.6; }
 .btn-bg-toggle:hover { opacity: 1; }

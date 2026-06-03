@@ -145,16 +145,24 @@
     <script src="src/views/release.js"></script>
     <script src="src/init.js"></script>
     <script>
-        const bgVideo = document.getElementById('bg-video');
-        const bgLayer = bgVideo.closest('.bg-layer');
-        const bgToggleBtn = document.getElementById('bg-toggle-btn');
-        bgVideo.playbackRate = 0.75;
-        bgToggleBtn.classList.add('active');
-        bgToggleBtn.addEventListener('click', () => {
-            const isOff = bgLayer.classList.toggle('bg-off');
-            bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
-            bgToggleBtn.classList.toggle('active', !isOff);
-        });
+        (function () {
+            const bgVideo = document.getElementById('bg-video');
+            const bgLayer = document.querySelector('.bg-layer');
+            const bgToggleBtn = document.getElementById('bg-toggle-btn');
+
+            // Set playback rate now and again once metadata loads (belt + suspenders)
+            function applyRate(v) { try { v.playbackRate = 0.95; } catch(e) {} }
+            applyRate(bgVideo);
+            bgVideo.addEventListener('loadedmetadata', function() { applyRate(bgVideo); }, { once: true });
+
+            bgToggleBtn.classList.add('active');
+            bgToggleBtn.addEventListener('click', function () {
+                const isOff = bgLayer.classList.toggle('bg-off');
+                document.body.style.background = isOff ? '#0a0a0a' : '';
+                bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
+                bgToggleBtn.classList.toggle('active', !isOff);
+            });
+        })();
     </script>
 </body>
 </html>
