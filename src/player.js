@@ -120,7 +120,7 @@ function showNowPlaying(title, artist, coverUrl) {
     if (coverUrl) { cover.src = coverUrl; cover.style.display = 'block'; }
     else { cover.style.display = 'none'; }
     bar.style.display = 'flex';
-    document.body.style.paddingBottom = '84px';
+    document.body.style.paddingBottom = '116px';
     _resetProgress();
     highlightActiveTrack();
 }
@@ -303,6 +303,13 @@ function shufflePlayAll() {
 
 var _progressInterval = null;
 
+function _fmtTime(s) {
+    s = Math.floor(s || 0);
+    var m = Math.floor(s / 60);
+    var sec = s % 60;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
 function _startProgressUpdate() {
     if (_progressInterval) return;
     _progressInterval = setInterval(function () {
@@ -313,6 +320,8 @@ function _startProgressUpdate() {
             if (!dur) return;
             var fill = document.getElementById('np-progress-fill');
             if (fill) fill.style.width = ((cur / dur) * 100) + '%';
+            var timeEl = document.getElementById('np-time');
+            if (timeEl) timeEl.textContent = _fmtTime(cur) + ' / ' + _fmtTime(dur);
         } catch (e) {}
     }, 500);
 }
@@ -325,6 +334,8 @@ function _resetProgress() {
     _stopProgressUpdate();
     var fill = document.getElementById('np-progress-fill');
     if (fill) { fill.style.transition = 'none'; fill.style.width = '0%'; }
+    var timeEl = document.getElementById('np-time');
+    if (timeEl) timeEl.textContent = '0:00 / 0:00';
     setTimeout(function () {
         if (fill) fill.style.transition = '';
     }, 50);
