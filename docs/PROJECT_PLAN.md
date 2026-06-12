@@ -1,0 +1,190 @@
+# Project Plan — Vinyl Collection Player → Paid Product
+
+> Living document. Update statuses as work lands.
+> Created 2026-06-12 from a full codebase audit (~5,400 lines JS, no build step, IndexedDB storage).
+
+**Status legend:** `[ ]` todo · `[~]` in progress · `[x]` done · `[-]` won't do
+
+---
+
+## 0. Blockers before charging money
+
+These are not features — they are prerequisites for a paid product.
+
+- [ ] **B1 — Discogs API commercial consent.** The Discogs API is free for *non-commercial* use. Charging requires written consent from Discogs; their image-licensing terms are also strict about cover art. Contact Discogs early — this is the biggest legal blocker.
+- [ ] **B2 — YouTube ToS compliance.** Player iframes are parked off-screen at 1×1 px (`index.html:69-70`). YouTube requires a visible player ≥ 200×200. Fix: show a small real player in the now-playing bar.
+- [ ] **B3 — Backend.** No server today → nothing to gate payment with, nowhere to keep an AI API key secret, no cloud sync. Plan: thin backend (Cloudflare Workers + D1/KV, or Supabase) for auth, license keys (Stripe / LemonSqueezy), sync, and AI proxying.
+
+---
+
+## 1. Bug list (by severity)
+
+### CRITICAL
+
+#### C1 — Stored XSS + UI breakage via `escJs` in inline handlers
+- **Where:** `src/utils.js:9`; call sites: `wantlist.js:277`, `tracks.js:142`, `store.js:128-129,173,201,328-332`, `collection.js:108,118`, `marketplace.js:248`
+- **What:** `escJs()` escapes `\` and `'` but **not `"`**. Its output is pasted into double-quoted HTML `onclick="..."` attributes.
+  1. *Breaks with normal data:* titles containing `"` (e.g. *Blue Monday 12"*) terminate the attribute mid-string — remove buttons on such cards are broken.
+  2. *Stored XSS:* a tag/batch name/release title like `peak" onmouseover="...` injects a live handler. The Discogs token sits in IndexedDB → XSS = token exfiltration = Discogs account takeover.
+- **Fix:** Short-term: make every call site attribute-safe (`escHtml(escJs(v))`). Proper: stop building `onclick` strings — put values in `data-*` attributes and use delegated `addEventListener` (kills the whole bug class).
+- **Status:** [ ]
+
+### HIGH
+
+#### H1 — Closing the player mid-crossfade leaves hidden audio playing
+- **Where:** `src/player.js:128-140` (`hideNowPlaying`), `src/crossfade.js:101-113` (`_completeCrossfade`)
+- **What:** `hideNowPlaying()` stops player 1 and clears the queue but never aborts the crossfade. Pressed while `_cfState === 'fading'`: player 2 keeps playing with the bar closed; when the fade completes, `_completeCrossfade()` reads from the now-empty queue → `item` undefined → throws, and player 2 plays forever (only a reload stops it).
+- **Fix:** Call `_abortCrossfade()` inside `hideNowPlaying()` before clearing state; defensively bail in `_completeCrossfade()` if `currentQueue[_cfPreloadedIndex]` is missing.
+- **Status:** [ ]
+
+#### H2 — "Go to Release" silently bounces to collection (string vs number key)
+- **Where:** `src/player.js:174-200` (`playTrack`/`playAll`), `src/setlists.js:241-252` (`gotoNowPlayingRelease`), `src/views/release.js:4`
+- **What:** Queue items built from DOM rows store `releaseId` as a **string** (`el.dataset.releaseId`), but IndexedDB release keys are **numbers** → `dbGet('releases', "12345")` returns undefined → `renderRelease` falls through to `navigate('collection')`. Works for setlist/suggestion queues (numeric ids), breaks for the most common path (clicking a track row). Stale string ids also persist via `sessionStorage`.
+- **Fix:** `parseInt(el.dataset.releaseId, 10) || null` in `playTrack`/`playAll` (same as `openAddToSetlistPopover` at `setlists.js:153`); defensive `Number(releaseId)` coercion at the top of `renderRelease`.
+- **Status:** [ ]
+
+#### H3 — Store "Refresh Price" hits the endpoint the codebase documents as CORS-broken
+- **Where:** `src/views/store.js:402-440` (`storeRefreshPrice`)
+- **What:** Calls `discogsGet('/marketplace/stats/' + id)` with an `Authorization` header — but `api.js:137-141` documents that `/marketplace/stats` doesn't support the CORS preflight the auth header triggers, and `marketplace.js:37-40` deliberately switched to `/releases/{id}` for exactly this reason. Likely fails every time (3 retries + misleading "Network error" banners). Also reads `data.highest_price`, which that endpoint doesn't return, so the price *range* can never render.
+- **Fix:** Use `discogsGet('/releases/' + id)` (gives `num_for_sale` + `lowest_price`); drop the phantom `highest_price` or source it from `/marketplace/price_suggestions`.
+- **Status:** [ ]
+
+### MEDIUM
+
+#### M1 — Crossfade silently skips short tracks
+- **Where:** `src/crossfade.js:50-54`
+- **What:** Guard `duration < cfSeconds + 2` skips crossfade with no feedback; with a long fade (e.g. 9 s) on a 10 s track the fade just doesn't happen. Magic `+2` constant.
+- **Fix:** Clamp `cfSeconds` against track duration at fade time, or surface the limit in the UI.
+- **Status:** [ ]
+
+#### M2 — Orphaned `marketplace_stats` / `notifications` when wants are removed
+- **Where:** `src/views/wantlist_sync.js:88-93` (stale-want prune), `src/views/wantlist.js:438` (`wlRemove`)
+- **What:** Deleting a want never deletes its `marketplace_stats` row (or its notifications). Orphaned data accumulates and leaks into backups.
+- **Fix:** Delete matching `marketplace_stats` (and optionally notifications) alongside each `dbDelete('wants', …)`.
+- **Status:** [ ]
+
+#### M3 — Partial sync failure can wipe releases + user-entered track metadata
+- **Where:** `src/api.js:200-234` (`syncCollection` save + prune loops)
+- **What:** If a folder fetch throws midway, a half-built `allReleases` map can be persisted, and the prune step deletes every release **not** in the partial map — including its `track_meta` (BPM/key/rating the user typed by hand). A transient network error can destroy data.
+- **Fix:** Only run the prune pass after a fully successful fetch of all folders; sanity-check the new map is non-empty/plausible before deleting.
+- **Status:** [ ]
+
+#### M4 — Surprise autoplay on tab restore
+- **Where:** `src/player_state.js:15-35` (`_restorePlayerState`)
+- **What:** State saved every 2 s while playing; on reload the app **auto-plays** from the saved position. Combined with `onversionchange` auto-reload (`db.js:79-84`), opening a second tab can trigger unexpected playback.
+- **Fix:** Restore in paused/cued state by default (the cue branch already exists).
+- **Status:** [ ]
+
+#### M5 — Marketplace notification baseline edge cases
+- **Where:** `src/marketplace.js:48-62`
+- **What:** Alerts fire only on a confirmed 0 → 1+ transition. Items already for sale at first check never alert (by design), but `marketplace_stats` restored from an old backup carries a stale `num_for_sale` baseline → spurious or missed alerts after restore.
+- **Fix:** Invalidate/refresh `checked_at` baselines on backup restore, or treat restored stats as `prevNum = null`.
+- **Status:** [ ]
+
+### LOW
+
+#### L1 — Leaked global timers
+- **Where:** `src/init.js:4` (`_saveInterval`), `src/marketplace.js:88` (poll interval)
+- **What:** Never cleared. Harmless in a never-torn-down SPA, but technically leaks.
+- **Status:** [ ]
+
+#### L2 — Queue panel leaks document-level listeners on every re-render
+- **Where:** `src/queue.js:28-33` (`makeDraggable`), `src/queue.js:53-55` (`_renderQueuePanel`)
+- **What:** `_renderQueuePanel` removes the old panel with `.remove()` without calling its `_cleanup()`, leaking a `mousemove` + `mouseup` document listener pair per re-render (which happens on every queue action / track change).
+- **Fix:** Call `existing._cleanup()` before `existing.remove()`.
+- **Status:** [ ]
+
+#### L3 — `bpmDelta` edge cases
+- **Where:** `src/harmonic.js:27-33`
+- **What:** BPM of `0` treated as missing (falsy); half/double-time computed in overlapping ways. Cosmetic scoring noise.
+- **Status:** [ ]
+
+#### L4 — Duplicate/conflicting bg-video scripts; first one throws
+- **Where:** `index.html:15-26` (head script) vs `index.html:156-175` (body script)
+- **What:** Head script sets `playbackRate = 0.5` and references `#bg-toggle-btn` **before it exists in the DOM** → throws at line 20, its toggle handler never binds. Body script (rate 0.95) is the one that works. Dead/throwing code.
+- **Fix:** Delete the head script block.
+- **Status:** [ ]
+
+#### L5 — Date handling assumes valid ISO strings
+- **Where:** `src/marketplace.js:175-183` (`formatTimeAgo`), ETA math in `api.js`
+- **What:** Malformed dates render `NaN`. Cosmetic.
+- **Status:** [ ]
+
+#### L6 — Pagination ellipsis glitches
+- **Where:** `src/views/collection.js:165-172` (same pattern in `tracks.js`, `wantlist.js`)
+- **What:** Certain page counts render doubled `...` or odd gaps. Cosmetic.
+- **Status:** [ ]
+
+### Triage table
+
+| ID | Severity | One-line | Effort |
+|----|----------|----------|--------|
+| C1 | Critical | `escJs` doesn't escape `"` → broken UI + stored XSS → token theft | S (patch) / M (proper) |
+| H1 | High | Close-player mid-crossfade = stuck hidden audio + throw | S |
+| H2 | High | "Go to release" broken for track-row queues (string vs number id) | S |
+| H3 | High | Store price refresh hits CORS-broken endpoint | S |
+| M1 | Medium | Crossfade silently skips very short tracks | S |
+| M2 | Medium | Orphaned marketplace_stats/notifications on want removal | S |
+| M3 | Medium | Partial sync failure can wipe releases + track metadata | M |
+| M4 | Medium | Surprise autoplay on tab restore | S |
+| M5 | Medium | Notification baseline edge cases after restore | S |
+| L1–L6 | Low | Leaked timers/listeners, dead bg script, cosmetics | S each |
+
+---
+
+## 2. Professionalization (the unglamorous 80%)
+
+- [ ] **P1 — Fix C1–H3 first.** With a Discogs token in IndexedDB, XSS is account takeover; can't charge money on top of that.
+- [ ] **P2 — Accounts + cloud sync.** "Your data lives only in this browser" is the #1 commercial weakness; flip it into the #1 paid feature ("synced across devices, never lose crate data"). IndexedDB stays as offline cache; sync to backend.
+- [ ] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI.
+- [ ] **P4 — Event delegation.** Replace all inline `onclick="..."` string building with `data-*` attributes + delegated listeners (also resolves C1 permanently).
+- [ ] **P5 — PWA.** Manifest + service worker → installable, offline crate browsing at record fairs; pairs perfectly with the store/serial feature.
+- [ ] **P6 — UX polish.** Proper toast system instead of `alert()` and sync-banner reuse; loading/empty states; error boundaries.
+- [ ] **P7 — Landing page + demo mode.** Pricing page, docs, and a demo collection so prospects can try without a Discogs token.
+
+---
+
+## 3. Premium / AI features
+
+All AI calls go through the backend proxy (B3), metered per tier. Collection data is small and structured — ideal LLM input.
+
+- [ ] **F1 — Collection Intelligence Report (flagship).** Feed releases/styles/years/countries/track_meta to an LLM → personal "Rewind": taste profile, era/label/pressing-country clustering, blind spots, fun facts, valuation summary from existing marketplace stats. Shareable → built-in marketing.
+- [ ] **F2 — Natural-language crate digging.** "Warm, melodic, 115–125 BPM, sunset opener" → ranked tracks from *your* collection. Embed metadata once, vector-search client-side, optional LLM re-rank. Constrain by key compatibility via existing `harmonic.js`.
+- [ ] **F3 — AI setlist generator.** Input: vibe, duration, opening track. Output: full setlist with an energy arc — Camelot scoring as hard constraint, LLM for narrative flow. Exports via existing M3U/CSV.
+- [ ] **F4 — AI metadata enrichment.** One-click estimation of BPM/key/energy/mood from title + style + year, marked "estimated" until verified. Directly feeds suggestions, filters, and F3 (the suggestion engine is currently starved by manual-only BPM/key).
+- [ ] **F5 — Smart buying advisor.** Deal scoring (listing price vs `price_suggestions`), price-history sparklines, "30% below typical — buy signal", AI want-list recommendations from the taste profile.
+- [ ] **F6 — Dealer tools (Store tier).** AI pricing by condition/style/scarcity, sales-velocity insights from sold history, auto-generated listing descriptions, printable QR labels per serial.
+
+### Community-sourced features (from Discogs user complaints/wishlists + companion-app survey)
+
+Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly, Discographic, WaxHub, vinyl-shelf-finder). These mostly work with or without the backend.
+
+- [ ] **F7 — Barcode scanner.** Camera → `/database/search?barcode=` → add to collection/wantlist. Most-requested companion-app feature. Browser-only: `BarcodeDetector` API (Chromium) + ZXing-wasm fallback (Safari/Firefox). *Effort: M.*
+- [ ] **F8 — Master-based wantlist matching.** Collectors want "any pressing of this album"; Discogs only matches exact releases — their #1 marketplace gap. Resolve each want's `master_id` (1 call, cacheable forever), then extend the existing `marketplace.js` poll to track lowest price across `/masters/{id}/versions`. ⚠️ Needs rate-budget design within the 60 req/min bucket. *Effort: M.*
+- [ ] **F9 — Wantlist criteria + smart alerts (max price).** Per-want max-price threshold; notifications respect it. Builds directly on the existing notification engine. ⚠️ **Scope limit:** the Discogs API exposes no per-listing marketplace data (only `num_for_sale` + `lowest_price`), so *min-condition* and *seller-country* filters are **not implementable** client-side — max-price only. *Effort: S–M.*
+- [ ] **F10 — Price history snapshots → sparklines.** We already poll every 30 min; start **timestamping and storing snapshots now** so history accrues before the chart feature ships (zero-cost data accrual). Render sparklines later. *Effort: S.*
+- [ ] **F11 — Stats / collection-value dashboard (non-AI).** Real-time collection value, have/want collectability (from `community.have`/`community.want` on the release endpoint), genre/decade/country breakdowns. All data is already local; pure rendering. Great free-tier hook; the AI report (F1) becomes the premium layer on top. *Effort: S.*
+- [ ] **F12 — Last.fm scrobbling.** The YouTube player already fires track events; POST scrobbles to Last.fm. ⚠️ Signing requires the API shared secret — acceptable embedded client-side for a hobby tool, **not for a paid product**; route through the backend once B3 lands. *Effort: S–M.*
+- [ ] **F13 — Visual shelf finder.** The `shelf` field already exists in track_meta; add an ordered shelf-map view to locate records physically. *Effort: M.*
+- [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
+- [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
+
+### Proposed tiers
+
+| Tier | Price idea | Contents |
+|------|-----------|----------|
+| Free | $0 | Everything that exists today, local-only, + stats dashboard (F11) as a hook |
+| Pro | ~$6/mo | Cloud sync + accounts, F1–F4, F7–F10, F12, F14, push/email marketplace alerts |
+| Dealer | ~$15/mo | Pro + store suite, F5–F6, F13, sales analytics |
+
+---
+
+## 4. Suggested milestones
+
+1. **M-0 Hardening:** C1, H1, H2, H3, L2, L4 — safe to demo publicly. **Also start F10 snapshot recording now** (trivial, and history accrues from day one).
+2. **M-1 Data safety:** M2, M3, M4, M5 + backup-format version bump.
+3. **M-2 Quick wins (no backend needed):** F11 stats dashboard, F7 barcode scanner, F9 max-price alerts — visible product momentum while foundation work happens.
+4. **M-3 Foundation:** B2, B3, P3, P4 — backend, modules, CI.
+5. **M-4 Monetization:** B1, P2, P7 + Stripe/license gating.
+6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
+7. **M-6 AI wave 2 + community features:** F2, F3, F5, F6, F8, F12, F13, F14 + PWA (P5).
