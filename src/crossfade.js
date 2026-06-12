@@ -99,11 +99,14 @@ function _startCrossfade() {
 }
 
 function _completeCrossfade() {
+    // Queue may have been cleared or shrunk (e.g. player closed, tracks
+    // removed) while the fade ran — bail out instead of loading undefined.
+    var item = currentQueue[_cfPreloadedIndex];
+    if (!item) { _abortCrossfade(); return; }
     _cfState = 'switching';
     var p2Time = 0;
     try { p2Time = player2.getCurrentTime() || 0; } catch (e) {}
     currentIndex = _cfPreloadedIndex;
-    var item = currentQueue[currentIndex];
     showNowPlaying(item.title, item.artist, item.cover);
     try {
         player.setVolume(0);

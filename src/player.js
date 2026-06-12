@@ -126,6 +126,9 @@ function showNowPlaying(title, artist, coverUrl) {
 }
 
 function hideNowPlaying() {
+    // Abort any in-flight crossfade first: player2 may be audibly playing,
+    // and a pending _completeCrossfade() would read from the cleared queue.
+    if (_cfState !== 'idle') _abortCrossfade();
     stopViz();
     document.getElementById('now-playing').style.display = 'none';
     document.body.style.paddingBottom = '0';

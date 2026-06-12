@@ -35,7 +35,7 @@ These are not features — they are prerequisites for a paid product.
 - **Where:** `src/player.js:128-140` (`hideNowPlaying`), `src/crossfade.js:101-113` (`_completeCrossfade`)
 - **What:** `hideNowPlaying()` stops player 1 and clears the queue but never aborts the crossfade. Pressed while `_cfState === 'fading'`: player 2 keeps playing with the bar closed; when the fade completes, `_completeCrossfade()` reads from the now-empty queue → `item` undefined → throws, and player 2 plays forever (only a reload stops it).
 - **Fix:** Call `_abortCrossfade()` inside `hideNowPlaying()` before clearing state; defensively bail in `_completeCrossfade()` if `currentQueue[_cfPreloadedIndex]` is missing.
-- **Status:** [ ]
+- **Status:** [x] Both parts implemented: `hideNowPlaying()` aborts any non-idle crossfade before clearing the queue, and `_completeCrossfade()` bails via `_abortCrossfade()` when the preloaded queue item no longer exists.
 
 #### H2 — "Go to Release" silently bounces to collection (string vs number key)
 - **Where:** `src/player.js:174-200` (`playTrack`/`playAll`), `src/setlists.js:241-252` (`gotoNowPlayingRelease`), `src/views/release.js:4`
