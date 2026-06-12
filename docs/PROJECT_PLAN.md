@@ -155,21 +155,36 @@ All AI calls go through the backend proxy (B3), metered per tier. Collection dat
 - [ ] **F5 — Smart buying advisor.** Deal scoring (listing price vs `price_suggestions`), price-history sparklines, "30% below typical — buy signal", AI want-list recommendations from the taste profile.
 - [ ] **F6 — Dealer tools (Store tier).** AI pricing by condition/style/scarcity, sales-velocity insights from sold history, auto-generated listing descriptions, printable QR labels per serial.
 
+### Community-sourced features (from Discogs user complaints/wishlists + companion-app survey)
+
+Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly, Discographic, WaxHub, vinyl-shelf-finder). These mostly work with or without the backend.
+
+- [ ] **F7 — Barcode scanner.** Camera → `/database/search?barcode=` → add to collection/wantlist. Most-requested companion-app feature. Browser-only: `BarcodeDetector` API (Chromium) + ZXing-wasm fallback (Safari/Firefox). *Effort: M.*
+- [ ] **F8 — Master-based wantlist matching.** Collectors want "any pressing of this album"; Discogs only matches exact releases — their #1 marketplace gap. Resolve each want's `master_id` (1 call, cacheable forever), then extend the existing `marketplace.js` poll to track lowest price across `/masters/{id}/versions`. ⚠️ Needs rate-budget design within the 60 req/min bucket. *Effort: M.*
+- [ ] **F9 — Wantlist criteria + smart alerts (max price).** Per-want max-price threshold; notifications respect it. Builds directly on the existing notification engine. ⚠️ **Scope limit:** the Discogs API exposes no per-listing marketplace data (only `num_for_sale` + `lowest_price`), so *min-condition* and *seller-country* filters are **not implementable** client-side — max-price only. *Effort: S–M.*
+- [ ] **F10 — Price history snapshots → sparklines.** We already poll every 30 min; start **timestamping and storing snapshots now** so history accrues before the chart feature ships (zero-cost data accrual). Render sparklines later. *Effort: S.*
+- [ ] **F11 — Stats / collection-value dashboard (non-AI).** Real-time collection value, have/want collectability (from `community.have`/`community.want` on the release endpoint), genre/decade/country breakdowns. All data is already local; pure rendering. Great free-tier hook; the AI report (F1) becomes the premium layer on top. *Effort: S.*
+- [ ] **F12 — Last.fm scrobbling.** The YouTube player already fires track events; POST scrobbles to Last.fm. ⚠️ Signing requires the API shared secret — acceptable embedded client-side for a hobby tool, **not for a paid product**; route through the backend once B3 lands. *Effort: S–M.*
+- [ ] **F13 — Visual shelf finder.** The `shelf` field already exists in track_meta; add an ordered shelf-map view to locate records physically. *Effort: M.*
+- [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
+- [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
+
 ### Proposed tiers
 
 | Tier | Price idea | Contents |
 |------|-----------|----------|
-| Free | $0 | Everything that exists today, local-only |
-| Pro | ~$6/mo | Cloud sync + accounts, F1–F4, push/email marketplace alerts |
-| Dealer | ~$15/mo | Pro + store suite, F5–F6, sales analytics |
+| Free | $0 | Everything that exists today, local-only, + stats dashboard (F11) as a hook |
+| Pro | ~$6/mo | Cloud sync + accounts, F1–F4, F7–F10, F12, F14, push/email marketplace alerts |
+| Dealer | ~$15/mo | Pro + store suite, F5–F6, F13, sales analytics |
 
 ---
 
 ## 4. Suggested milestones
 
-1. **M-0 Hardening:** C1, H1, H2, H3, L2, L4 — safe to demo publicly.
+1. **M-0 Hardening:** C1, H1, H2, H3, L2, L4 — safe to demo publicly. **Also start F10 snapshot recording now** (trivial, and history accrues from day one).
 2. **M-1 Data safety:** M2, M3, M4, M5 + backup-format version bump.
-3. **M-2 Foundation:** B2, B3, P3, P4 — backend, modules, CI.
-4. **M-3 Monetization:** B1, P2, P7 + Stripe/license gating.
-5. **M-4 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
-6. **M-5 AI wave 2:** F2, F3, F5, F6 + PWA (P5).
+3. **M-2 Quick wins (no backend needed):** F11 stats dashboard, F7 barcode scanner, F9 max-price alerts — visible product momentum while foundation work happens.
+4. **M-3 Foundation:** B2, B3, P3, P4 — backend, modules, CI.
+5. **M-4 Monetization:** B1, P2, P7 + Stripe/license gating.
+6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
+7. **M-6 AI wave 2 + community features:** F2, F3, F5, F6, F8, F12, F13, F14 + PWA (P5).
