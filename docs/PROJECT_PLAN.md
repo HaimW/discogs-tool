@@ -27,7 +27,7 @@ These are not features — they are prerequisites for a paid product.
   1. *Breaks with normal data:* titles containing `"` (e.g. *Blue Monday 12"*) terminate the attribute mid-string — remove buttons on such cards are broken.
   2. *Stored XSS:* a tag/batch name/release title like `peak" onmouseover="...` injects a live handler. The Discogs token sits in IndexedDB → XSS = token exfiltration = Discogs account takeover.
 - **Fix:** Short-term: make every call site attribute-safe (`escHtml(escJs(v))`). Proper: stop building `onclick` strings — put values in `data-*` attributes and use delegated `addEventListener` (kills the whole bug class).
-- **Status:** [ ]
+- **Status:** [x] Patched centrally in `escJs()` (JS-escape, then HTML-entity-escape; also handles `\r\n` and U+2028/U+2029). Verified: no single-quoted handler attributes exist, so all 17 call sites are covered. Proper structural fix (event delegation) remains tracked as P4.
 
 ### HIGH
 
