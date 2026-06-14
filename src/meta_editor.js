@@ -38,6 +38,8 @@ function renderTrackMetaEditor(panel, metaId) {
             '<label class="meta-field"><span>Rating</span><select id="mf-rating-' + id + '">' + ratingOptions + '</select></label>' +
             '<label class="meta-field"><span>Energy 1-10</span><input type="number" min="1" max="10" id="mf-energy-' + id + '" value="' + (meta.energy != null ? meta.energy : '') + '"></label>' +
             '<label class="meta-field"><span>Shelf</span><input type="text" id="mf-shelf-' + id + '" value="' + escHtml(meta.shelf || '') + '" placeholder="e.g. A3"></label>' +
+            '<label class="meta-field"><span>גובה גלים (m)</span><input type="number" step="0.1" min="0" id="mf-wave-height-' + id + '" value="' + (meta.wave_height != null ? meta.wave_height : '') + '" placeholder="e.g. 1.5"></label>' +
+            '<label class="meta-field"><span>כיוון גלים (°)</span><input type="number" step="1" min="0" max="360" id="mf-wave-dir-' + id + '" value="' + (meta.wave_dir != null ? meta.wave_dir : '') + '" placeholder="0–360"></label>' +
             '<label class="meta-field wide"><span>Tags (comma-separated)</span><input type="text" id="mf-tags-' + id + '" value="' + escHtml(tagsStr) + '" placeholder="peak, closer, floor filler"></label>' +
             '<label class="meta-field wide"><span>Notes</span><textarea id="mf-notes-' + id + '" rows="2">' + escHtml(meta.notes || '') + '</textarea></label>' +
             '<label class="meta-field checkbox"><input type="checkbox" id="mf-verified-' + id + '"' + (meta.verified ? ' checked' : '') + '> <span>YouTube link verified</span></label>' +
@@ -56,6 +58,10 @@ function saveTrackMetaFromForm(metaId, releaseId, youtubeId) {
     var energy = energyRaw === '' ? null : parseInt(energyRaw, 10);
     var rating = parseInt(document.getElementById('mf-rating-' + metaId).value, 10);
     var tagsRaw = document.getElementById('mf-tags-' + metaId).value.trim();
+    var waveHeightRaw = document.getElementById('mf-wave-height-' + metaId).value.trim();
+    var waveHeight = waveHeightRaw === '' ? null : parseFloat(waveHeightRaw);
+    var waveDirRaw = document.getElementById('mf-wave-dir-' + metaId).value.trim();
+    var waveDir = waveDirRaw === '' ? null : parseInt(waveDirRaw, 10);
     var patch = {
         release_id: releaseId,
         youtube_id: youtubeId,
@@ -64,6 +70,8 @@ function saveTrackMetaFromForm(metaId, releaseId, youtubeId) {
         rating: rating > 0 ? rating : null,
         energy: (energy != null && isFinite(energy)) ? energy : null,
         shelf: document.getElementById('mf-shelf-' + metaId).value.trim() || '',
+        wave_height: (waveHeight != null && isFinite(waveHeight)) ? waveHeight : null,
+        wave_dir: (waveDir != null && isFinite(waveDir)) ? waveDir : null,
         tags: tagsRaw ? tagsRaw.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return !!t; }) : [],
         notes: document.getElementById('mf-notes-' + metaId).value.trim() || '',
         verified: document.getElementById('mf-verified-' + metaId).checked
