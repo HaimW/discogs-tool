@@ -1,5 +1,33 @@
 // ============ Track Metadata Editor ============
 
+// Render a 0-1 score as a percentage, clamped so an out-of-range value from an
+// older record can never show something absurd like "155%".
+function pct(v) {
+    var n = Number(v);
+    if (!isFinite(n)) return '?';
+    return Math.round(Math.max(0, Math.min(1, n)) * 100) + '%';
+}
+
+// bpm/key as they were when the editor opened, keyed by metaId. Saving compares
+// against these so only a genuine edit marks a value as human-entered.
+var _metaEditorLoaded = {};
+
+// Clicking a segment of the Camelot wheel: update the dropdown (still the
+// source of truth on save) and repaint the wheel so the selection shows.
+function metaEditorPickKey(code, metaId) {
+    var sel = document.getElementById('mf-key-' + metaId);
+    if (!sel) return;
+    sel.value = code;
+    metaEditorSyncWheel(metaId);
+}
+
+function metaEditorSyncWheel(metaId) {
+    var sel = document.getElementById('mf-key-' + metaId);
+    var wheel = document.getElementById('mf-wheel-' + metaId);
+    if (!sel || !wheel) return;
+    wheel.innerHTML = camelotWheelSvg(sel.value, 'metaEditorPickKey', metaId);
+}
+
 function toggleTrackMetaEditor(metaId) {
     var panel = document.getElementById('editor-' + metaId);
     if (!panel) return;
@@ -31,16 +59,46 @@ function renderTrackMetaEditor(panel, metaId) {
         }
         var tagsStr = (meta.tags || []).join(', ');
         var id = metaId;
+
+        // Remember what was loaded so saving can tell an actual edit from an
+        // untouched value. Only a real change stamps the field as human-entered
+        // (see saveTrackMetaFromForm) — otherwise editing an unrelated field
+        // would permanently lock the desktop analyzer out of re-analysing it.
+        _metaEditorLoaded[id] = {
+            bpm: meta.bpm != null ? meta.bpm : null,
+            key: meta.key || null,
+            energy: meta.energy != null ? meta.energy : null
+        };
+
+        var estimated = (meta.bpm_source === 'analysis' || meta.key_source === 'analysis' ||
+                         meta.energy_source === 'analysis');
+        var provenance = '';
+        if (estimated && !meta.bpm_verified) {
+            var bits = [];
+            // Both figures are normalised 0-1 by the analyzer, so they are safe
+            // to show as percentages. aubio's own confidence is unbounded and is
+            // scaled before it ever reaches this record.
+            if (meta.bpm_confidence != null) bits.push('BPM confidence ' + pct(meta.bpm_confidence));
+            if (meta.key_strength != null) bits.push('key agreement ' + pct(meta.key_strength));
+            provenance =
+                '<div class="meta-provenance">Estimated by the desktop analyzer' +
+                (bits.length ? ' &mdash; ' + escHtml(bits.join(', ')) : '') +
+                '. Tick &ldquo;BPM/key verified&rdquo; once you have checked it.</div>';
+        }
+
         panel.innerHTML =
             '<div class="meta-grid">' +
             '<label class="meta-field"><span>BPM</span><input type="number" step="0.1" min="40" max="220" id="mf-bpm-' + id + '" value="' + (meta.bpm != null ? meta.bpm : '') + '"></label>' +
-            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '">' + keyOptions + '</select></label>' +
+            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '" onchange="metaEditorSyncWheel(\'' + escJs(id) + '\')">' + keyOptions + '</select></label>' +
             '<label class="meta-field"><span>Rating</span><select id="mf-rating-' + id + '">' + ratingOptions + '</select></label>' +
             '<label class="meta-field"><span>Energy 1-10</span><input type="number" min="1" max="10" id="mf-energy-' + id + '" value="' + (meta.energy != null ? meta.energy : '') + '"></label>' +
             '<label class="meta-field"><span>Shelf</span><input type="text" id="mf-shelf-' + id + '" value="' + escHtml(meta.shelf || '') + '" placeholder="e.g. A3"></label>' +
             '<label class="meta-field wide"><span>Tags (comma-separated)</span><input type="text" id="mf-tags-' + id + '" value="' + escHtml(tagsStr) + '" placeholder="peak, closer, floor filler"></label>' +
             '<label class="meta-field wide"><span>Notes</span><textarea id="mf-notes-' + id + '" rows="2">' + escHtml(meta.notes || '') + '</textarea></label>' +
             '<label class="meta-field checkbox"><input type="checkbox" id="mf-verified-' + id + '"' + (meta.verified ? ' checked' : '') + '> <span>YouTube link verified</span></label>' +
+            '<label class="meta-field checkbox"><input type="checkbox" id="mf-bpmverified-' + id + '"' + (meta.bpm_verified ? ' checked' : '') + '> <span>BPM/key verified</span></label>' +
+            '<div class="meta-field wide camelot-picker" id="mf-wheel-' + id + '">' + camelotWheelSvg(meta.key, 'metaEditorPickKey', id) + '</div>' +
+            provenance +
             '</div>' +
             '<div class="meta-actions">' +
             '<button class="btn" onclick="toggleTrackMetaEditor(\'' + id + '\')">Cancel</button>' +
@@ -56,18 +114,30 @@ function saveTrackMetaFromForm(metaId, releaseId, youtubeId) {
     var energy = energyRaw === '' ? null : parseInt(energyRaw, 10);
     var rating = parseInt(document.getElementById('mf-rating-' + metaId).value, 10);
     var tagsRaw = document.getElementById('mf-tags-' + metaId).value.trim();
+    var key = document.getElementById('mf-key-' + metaId).value || null;
     var patch = {
         release_id: releaseId,
         youtube_id: youtubeId,
         bpm: (bpm != null && isFinite(bpm)) ? bpm : null,
-        key: document.getElementById('mf-key-' + metaId).value || null,
+        key: key,
         rating: rating > 0 ? rating : null,
         energy: (energy != null && isFinite(energy)) ? energy : null,
         shelf: document.getElementById('mf-shelf-' + metaId).value.trim() || '',
         tags: tagsRaw ? tagsRaw.split(',').map(function (t) { return t.trim(); }).filter(function (t) { return !!t; }) : [],
         notes: document.getElementById('mf-notes-' + metaId).value.trim() || '',
-        verified: document.getElementById('mf-verified-' + metaId).checked
+        verified: document.getElementById('mf-verified-' + metaId).checked,
+        bpm_verified: document.getElementById('mf-bpmverified-' + metaId).checked
     };
+
+    // Record provenance so the desktop analyzer knows what it may overwrite.
+    // Only a value the user actually changed counts as human-entered — saving
+    // an untouched analyzer result must not lock it against future re-analysis.
+    // `saveTrackMeta` merges the patch, so omitting a field leaves it as it was.
+    var loaded = _metaEditorLoaded[metaId] || { bpm: null, key: null, energy: null };
+    if (patch.bpm !== loaded.bpm) patch.bpm_source = patch.bpm != null ? 'manual' : null;
+    if (patch.key !== loaded.key) patch.key_source = patch.key != null ? 'manual' : null;
+    if (patch.energy !== loaded.energy) patch.energy_source = patch.energy != null ? 'manual' : null;
+    delete _metaEditorLoaded[metaId];
     saveTrackMeta(metaId, patch).then(function () {
         renderCurrentView();
     });

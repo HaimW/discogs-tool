@@ -343,7 +343,7 @@ function renderSetlist(setlistId) {
                     '</div>';
                 html += '<span class="track-badges">';
                 if (meta.bpm != null) html += '<span class="track-badge badge-bpm">' + meta.bpm + '</span>';
-                if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
+                if (meta.key) html += camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
                 if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                 html += '</span>';
                 html += '<button class="meta-btn" onclick="removeTrackFromSetlist(' + sl.id + ',' + i + ')" title="Remove">&times;</button>';

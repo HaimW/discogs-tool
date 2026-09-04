@@ -107,6 +107,8 @@ function openSuggestions() {
                 releaseTitle: r.title || '',
                 bpm: m.bpm != null ? m.bpm : null,
                 key: m.key || null,
+                key_source: m.key_source || null,
+                bpm_verified: m.bpm_verified || false,
                 rating: m.rating || null,
                 genres: r.genres || ''
             };
@@ -149,7 +151,7 @@ function renderSuggestionsPanel(ctx, cands) {
                 '</div>';
             html += '<span class="track-badges">';
             if (c.bpm != null) html += '<span class="track-badge badge-bpm">' + c.bpm + '</span>';
-            if (c.key) html += '<span class="track-badge badge-key">' + escHtml(c.key) + '</span>';
+            if (c.key) html += camelotChip(c.key, { estimated: c.key_source === 'analysis' && !c.bpm_verified });
             if (c.rating) html += '<span class="track-badge badge-rating">' + ratingStars(c.rating) + '</span>';
             html += '<span class="track-badge score-badge">' + Math.round(c.score) + '</span>';
             html += '</span>';

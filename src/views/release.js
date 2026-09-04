@@ -101,7 +101,7 @@ function renderRelease(releaseId) {
                 if (meta) {
                     html += '<span class="track-badges">';
                     if (meta.bpm != null && meta.bpm !== '') html += '<span class="track-badge badge-bpm">' + meta.bpm + ' BPM</span>';
-                    if (meta.key) html += '<span class="track-badge badge-key">' + escHtml(meta.key) + '</span>';
+                    if (meta.key) html += camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
                     if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                     if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
                     html += '</span>';
