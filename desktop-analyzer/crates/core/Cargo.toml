@@ -1,0 +1,10 @@
+[package]
+name = "analyzer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Backup parsing, work planning, provenance-aware merging and Camelot conversion for the desktop BPM/key analyzer. No native dependencies."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,6 @@
+# Rust build artifacts — hundreds of files, hundreds of MB, all regenerable
+# with `cargo build`.
+/target
+
+# The yt-dlp sidecar binary is fetched at setup time, not vendored.
+/binaries

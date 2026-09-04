@@ -1,0 +1,15 @@
+[package]
+name = "analyzer-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BPM detection (aubio) and musical key detection (libkeyfinder) behind a safe Rust interface."
+
+[dependencies]
+analyzer-core = { path = "../core" }
+symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3", "ogg", "vorbis", "wav", "flac"] }
+
+[build-dependencies]
+bindgen = "0.70"
+cc = { version = "1", features = ["parallel"] }
+pkg-config = "0.3"

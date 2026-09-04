@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/analysis"]
+
+# `src-tauri` joins this list once the app shell is scaffolded. `core` stays
+# free of native dependencies so it builds and tests on a bare Rust toolchain.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# GPL-3.0 because the analysis crate links aubio and libkeyfinder, both
+# GPLv3. This applies to the desktop analyzer only: the web app is a separate
+# program that exchanges JSON files with it, so its licensing is unaffected.
+license = "GPL-3.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
