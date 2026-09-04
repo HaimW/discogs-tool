@@ -4,6 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "BPM detection (aubio) and musical key detection (libkeyfinder) behind a safe Rust interface."
+# Declaring the native library lets this build script publish the libkeyfinder
+# directory to dependent crates as DEP_KEYFINDER_RPATH. Without that, binaries
+# in other crates link fine but cannot find libkeyfinder.so at run time:
+# `cargo:rustc-link-arg` applies only to the crate that emits it and does not
+# propagate to dependents.
+links = "keyfinder"
 
 [dependencies]
 analyzer-core = { path = "../core" }

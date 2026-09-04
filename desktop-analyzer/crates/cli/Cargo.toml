@@ -1,0 +1,28 @@
+[package]
+name = "analyzer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command-line front end: plans, downloads, analyses and exports a collection's BPM/key data."
+
+# A library as well as a binary so the end-to-end test can drive the whole run
+# with stub download/analysis steps instead of hitting YouTube.
+build = "build.rs"
+
+[lib]
+name = "analyzer_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "discogs-analyzer"
+path = "src/main.rs"
+
+[dependencies]
+analyzer-core = { path = "../core" }
+analyzer-analysis = { path = "../analysis" }
+analyzer-download = { path = "../download" }
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
+
+[dev-dependencies]
+serde_json.workspace = true

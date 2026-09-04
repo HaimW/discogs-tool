@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/analysis"]
+members = ["crates/core", "crates/analysis", "crates/download", "crates/cli"]
 
 # `src-tauri` joins this list once the app shell is scaffolded. `core` stays
 # free of native dependencies so it builds and tests on a bare Rust toolchain.

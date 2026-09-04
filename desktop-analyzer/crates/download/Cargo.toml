@@ -1,0 +1,9 @@
+[package]
+name = "analyzer-download"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "yt-dlp sidecar wrapper implementing the pipeline's Downloader trait."
+
+[dependencies]
+analyzer-core = { path = "../core" }

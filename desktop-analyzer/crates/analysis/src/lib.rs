@@ -89,10 +89,12 @@ pub fn analyze_samples(samples: &[f32], sample_rate: u32) -> Result<Analysis, An
     let energy = energy::estimate(samples, sample_rate);
     Ok(Analysis {
         bpm: round2(tempo.bpm),
-        bpm_confidence: tempo.confidence,
+        // Three decimals is already finer than these numbers are meaningful to,
+        // and it keeps the exported JSON readable.
+        bpm_confidence: round3(tempo.confidence),
         camelot: detected.camelot.code(),
         key_musical: detected.musical.name(),
-        key_strength: detected.strength,
+        key_strength: round3(detected.strength),
         key_segments: detected.segments,
         energy: energy.map(|e| e.level),
         duration_seconds: samples.len() as f64 / sample_rate.max(1) as f64,
@@ -101,6 +103,10 @@ pub fn analyze_samples(samples: &[f32], sample_rate: u32) -> Result<Analysis, An
 
 fn round2(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
 }
 
 #[cfg(test)]

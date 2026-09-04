@@ -33,6 +33,9 @@ fn main() {
         .allowlist_function("aubio_tempo_do")
         .allowlist_function("aubio_tempo_get_bpm")
         .allowlist_function("aubio_tempo_get_confidence")
+        // Exact beat positions in samples. The tempo is derived from these
+        // rather than from aubio's running estimate — see bpm.rs.
+        .allowlist_function("aubio_tempo_get_last")
         .allowlist_function("new_fvec")
         .allowlist_function("del_fvec")
         .allowlist_type("fvec_t")
@@ -61,6 +64,9 @@ fn main() {
 
     for dir in &keyfinder.link_paths {
         println!("cargo:rustc-link-search=native={}", dir.display());
+        // Published to dependent crates as DEP_KEYFINDER_RPATH so their
+        // binaries can bake in the same rpath — see `links` in Cargo.toml.
+        println!("cargo:rpath={}", dir.display());
         // Baked into the binary so it finds a library in a user prefix at run
         // time without the user having to set LD_LIBRARY_PATH.
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir.display());
