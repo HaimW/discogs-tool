@@ -1,6 +1,6 @@
 {
   "upstream": "https://github.com/HaimW/AgentSmith.git",
-  "commit": "fb211bee8cdf066a72ff191fe43fe8035a9a0e46",
+  "commit": "bbf3db63710bf48615134a030618a0d9d0ecbfa8",
   "tool": "claude",
   "vendoredAt": "2026-09-04T17:01:55.787Z",
   "files": {
@@ -21,7 +21,7 @@
     "agents/orchestrator.md": "ddf42359a2eab34add0798f2b72795f1cfc3ab700d46857995fa55d1aeb0762a",
     "agents/platform-engineer.md": "44770ab5c9abbd727a7361413db45a572826ebfd8d64917678f304ae90804783",
     "agents/product-manager.md": "4de81c3c715c08d4a998bc225359e1135287542db6c56a8a0d1dbb85e898abe0",
-    "agents/project-intake.md": "e1176b0ac97106a8f9dec2d699ad3a70a5ade6d1784d603c593e42c5e32ba82e",
+    "agents/project-intake.md": "dab555f0c3aba4dd608d41e72efb2a0e975e26a9a37d7f5da8ab854fb4a37f1a",
     "agents/qa-engineer-embedded.md": "d5f1d93e6b5f30146102b12641f3c952f7f6a7b966b224cdd106737ac346c75f",
     "agents/qa-engineer.md": "4d1783a95650752540f3e956903aee5e9d57322aabb55b07db0d6fa99dd82c0d",
     "agents/refactoring-specialist.md": "94813988f61d0b5d38f874e0ad686d94b8b95959094c765456bea32d5c7c228a",
@@ -60,7 +60,7 @@
     "skills/documentation/SKILL.md": "b3a9347010c8cbfd05ace76646ff3f8fb8eb4d35dc1a5b2d631d89349f6392b2",
     "skills/log-analysis/SKILL.md": "72dbaed2c6d3284448a873716da6d9a458733f6c8aea09aae84a50ce3c0bbf21",
     "skills/performance-tuning/SKILL.md": "f887590377d0e00104f40dc9eb28c5597b674c30132a52be4363fee4294b6f21",
-    "skills/project-tailoring/SKILL.md": "485961d695fd14ace74ce8e39867201bddbf8b2808772f6bfe6970287b849d13",
+    "skills/project-tailoring/SKILL.md": "9446e9bceceada76ef5f237e773a9500314d468b04cfaccaa657f3fbac91aa3c",
     "skills/refactoring/SKILL.md": "0c03b9354081969d7a815a1459bbd111faf1395336d1d3603a707be3cac4b576",
     "skills/security-review/SKILL.md": "1f0d7547699ee2e6af0cc5d32483cd1c364434b0b20077a2116017b25e0c79bb",
     "skills/security-review/scripts/scan-secrets.sh": "7f44573db6ce9a66981419d897613ea38b308999f1f8ad63f598df833ec5db6e",
@@ -73,5 +73,6 @@
     "tools/init.mjs": "172f02b3a5bef0d6959be5ca7fc4603e75b44b343c126b95cc8b47386ea3ce86",
     "tools/sync.mjs": "72da8dee59fd75e94a8ec122a3fff5a745ab7f67b6c6c14693c3875d26972444",
     "tools/validate.mjs": "20ed6f84be96225db62aebe3864e231f966020261f2aa2ca109b547e1a17cb4e"
-  }
+  },
+  "syncedAt": "2026-09-04T17:18:35.243Z"
 }
