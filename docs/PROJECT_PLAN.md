@@ -238,3 +238,55 @@ collection, occasionally after that for new adds.
 6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
 7. **M-6 AI wave 2 + community features:** F2, F3, F5, F6, F8, F12, F13, F14 + PWA (P5).
 8. **M-7 Desktop analysis helper:** section 3b — unblocks real BPM/key data (and F4) for friends/users without a backend.
+
+---
+
+## 5. Approved: Serverless Professionalization Pass
+
+**Status: approved, ready to start.** Scope discussed and greenlit
+2026-09-04. Pick this up from the CLI and work top to bottom — each
+group is independently shippable.
+
+**Explicitly out of scope:** P2 (accounts + cloud sync). Stays
+serverless/local-first. Nothing here should require a backend.
+
+### 5a. Code quality
+- [ ] Replace all inline `onclick="..."` handlers (132 across `src/*.js`,
+  `src/views/*.js`, `app.js`, `index.html`) with `data-*` attributes +
+  delegated `addEventListener`. Also closes the C1 XSS bug class
+  structurally (currently only patched at the escaping layer). This is P4.
+- [ ] Introduce a build: ES modules (replace global-scope script soup),
+  ESLint, Prettier, Vitest. No framework, no heavy bundler lock-in — keep
+  it light. This is P3.
+- [ ] GitHub Actions CI: lint + test + build on every push. Repo currently
+  has no `.github/` at all.
+- [ ] Priority test targets: `harmonic.js`, `store_serial.js`,
+  `crossfade.js` — pure logic, highest value per hour, currently untested.
+
+### 5b. Portability & polish
+- [ ] PWA: `manifest.json` + service worker → installable, works offline.
+  This is P5.
+- [ ] Replace `alert()` and ad-hoc sync-banner reuse with a proper
+  toast/error system. This is part of P6.
+- [ ] Onboarding fix (`src/views/setup.js`): validate the Discogs token
+  immediately on submit (test API call), show the resolved
+  username/avatar back as confirmation, instead of failing silently later
+  on the collection screen.
+- [ ] Cut the background video cost: `index.html:13`
+  (`A_dark_atmospheric_digital_ar.mp4`, 3.3MB, `autoplay`) — add
+  `preload="none"` + poster image, or re-encode much smaller. Biggest,
+  cheapest first-impression win in the repo.
+
+### 5c. Data model
+- [ ] Track identity refactor: `track_meta` currently keys off
+  `releaseId_youtubeId` (`src/meta.js:3`, `src/db.js` `videos` store keyed
+  on `release_id`), so BPM/key/rating are per (release, video) pair, not
+  per track. Same track across multiple pressings/comps gets analyzed
+  and rated separately. Introduce a track identity layer; releases
+  reference tracks; BPM/key/rating live on the track.
+- [ ] Split backup into **authored** data (track_meta, setlists,
+  store_items — irreplaceable) vs **derived** cache (releases, videos,
+  folders, tracklist, marketplace_stats — re-fetchable from Discogs).
+  Today `exportFullBackup()` (`src/backup.js`) mixes both in one blob.
+  Needs a backup-format version bump (ties into M2/M3/M4/M5 data-safety
+  bugs already in section 1).
