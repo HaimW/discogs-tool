@@ -1,0 +1,70 @@
+{
+  "writtenAt": "2026-09-04",
+  "domains": ["web_app"],
+  "domainsConsidered": ["backend_heavy"],
+  "domainsDeclineReason": "No backend exists yet (PROJECT_PLAN.md B3 is planned, not shipped); re-run project-intake once it lands.",
+  "stack": {
+    "languages": ["JavaScript"],
+    "frameworks": [],
+    "buildStep": false,
+    "packageManager": null,
+    "moduleSystem": "script-tag includes, fixed load order defined in index.html"
+  },
+  "runtime": {
+    "target": "GitHub Pages",
+    "deployMechanism": "static files served directly from this branch",
+    "deployPipeline": false
+  },
+  "dataStores": {
+    "client": ["IndexedDB"],
+    "server": [],
+    "externalApis": ["Discogs REST API", "YouTube iframe API"]
+  },
+  "team": {
+    "size": "solo",
+    "prReviewRequired": false,
+    "reviewNorm": "self-review via /code-review before merging"
+  },
+  "testing": {
+    "existing": "none",
+    "decision": "node-based unit tests only",
+    "candidateTools": ["Vitest", "node:test"],
+    "scope": "src/*.js logic only",
+    "e2e": false,
+    "shipsToBundleUnaffected": true
+  },
+  "cicd": {
+    "existing": false,
+    "decision": "add GitHub Actions to run tests on push/PR",
+    "relatedUnmergedBranch": "origin/claude/add-github-ci-workflow-fHHnF"
+  },
+  "performanceBudgets": "best effort, no SLIs/SLOs (no server)",
+  "security": {
+    "piiOrPayments": false,
+    "sensitiveCredential": "Discogs personal access token stored in IndexedDB",
+    "knownHistory": "PROJECT_PLAN.md C1 - stored XSS via escJs, patched",
+    "securityArchitectScope": "token/auth handling and verification only; payments/compliance out of scope until B1-B3 land"
+  },
+  "nonGoals": [
+    "No build step for the shipped app (script-tag includes only)",
+    "No backend/server yet (payments/auth deferred until PROJECT_PLAN.md B1-B3 land)"
+  ],
+  "prunedAgents": [
+    "backend-engineer-platform", "data-engineer", "database-engineer",
+    "devops-build-engineer-embedded", "embedded-product-manager",
+    "embedded-system-architect", "firmware-engineer",
+    "hardware-integration-engineer", "low-level-software-engineer",
+    "qa-engineer-embedded", "test-automation-engineer-embedded"
+  ],
+  "keptAgents": [
+    "backend-engineer-web", "frontend-engineer", "ux-ui-designer",
+    "code-reviewer", "debugger", "incident-review", "orchestrator",
+    "platform-engineer", "product-manager", "project-intake", "qa-engineer",
+    "refactoring-specialist", "reliability-engineer", "security-architect",
+    "system-architect", "technical-writer", "test-runner"
+  ],
+  "dormantAgents": {
+    "backend-engineer-web": "no backend exists yet",
+    "reliability-engineer": "no server exists yet to instrument"
+  }
+}

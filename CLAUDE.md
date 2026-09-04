@@ -26,23 +26,6 @@ Reviews are **advisory** — the implementing engineer decides and owns the resu
 - `frontend-engineer` — Frontend engineer for SPA/SSR architecture, performance, and accessibility. Use proactively for web UI implementation plans and reviews.
 - `ux-ui-designer` — UX/UI designer for user flows, UI states, and accessibility-oriented specs. Use proactively when designing web product experiences.
 
-### backend_heavy
-
-- `backend-engineer-platform` — Backend engineer for platform services/jobs with reliability and operability focus. Use proactively for API/service design and backend debugging in data-intensive systems.
-- `data-engineer` — Data engineer for pipelines/ETL, data quality, and orchestration in backend-heavy systems. Use proactively for pipeline design, backfills, and data reliability.
-- `database-engineer` — Database engineer for schema/indexing/migrations and query performance. Use proactively for data modeling and performance-critical changes.
-
-### embedded
-
-- `devops-build-engineer-embedded` — Embedded build/DevOps engineer for toolchains, reproducible builds, packaging, and CI for firmware artifacts. Use proactively for embedded CI/build issues.
-- `embedded-product-manager` — Embedded PM owning requirements and constraints (timing/memory/power) and delivery readiness. Use proactively for embedded initiative definition and prioritization.
-- `embedded-system-architect` — Embedded system architect providing concise reviews of timing/memory/power budgets and hardware–software interface risks. Use proactively for embedded designs.
-- `firmware-engineer` — Firmware engineer for embedded application logic under timing/memory/power constraints. Use proactively for firmware implementation plans and debugging.
-- `hardware-integration-engineer` — Hardware/board integration engineer for bring-up, interface validation, and cross-layer debugging. Use proactively when hardware constraints or integration risk exists.
-- `low-level-software-engineer` — Low-level embedded engineer for drivers/BSP/interrupt-level code and performance constraints. Use proactively for driver plans, bring-up support, and performance-critical debugging.
-- `qa-engineer-embedded` — Embedded QA engineer for lab testing, HIL coordination, and release confidence. Use proactively for embedded test planning and defect triage.
-- `test-automation-engineer-embedded` — Embedded test automation engineer for HIL/simulation regression and reproducible test harnesses. Use proactively for embedded regression automation and CI signal.
-
 ### cross_cutting
 
 - `code-reviewer` — Reviews code that has actually been written - diffs, new files, pull requests - for correctness, security, and maintainability. Use immediately after any non-trivial code change, and before committing or opening a PR. Reviews implementations, not designs.

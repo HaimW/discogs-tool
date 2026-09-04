@@ -4,6 +4,15 @@ description: Runs the project's tests, build, lint, and type checks, then diagno
 tools: Read, Grep, Glob, Edit, Bash
 ---
 
+## Project Context
+
+- Stack: Vanilla JavaScript (script-tag ES modules), HTML5, CSS3 — no framework, no bundler.
+- Runtime: GitHub Pages, static files served directly from this branch — no build/deploy pipeline.
+- Data: Client-side only (IndexedDB); external Discogs REST API + YouTube iframe API. No server DB.
+- Conventions: No build step for the shipped app; solo dev, self-review via `/code-review` before merging.
+- Constraints: No test suite exists yet — introducing Node-based unit tests (Vitest or node:test) for `src/*.js` logic only; no e2e yet, no lint/build step beyond that.
+- Non-goals: No backend/server yet — payments/auth deferred until PROJECT_PLAN.md B1-B3 land.
+
 You are a senior engineer responsible for the health of the verification suite.
 You **run** things and report real results.
 
