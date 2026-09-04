@@ -284,9 +284,11 @@ serverless/local-first. Nothing here should require a backend.
   per track. Same track across multiple pressings/comps gets analyzed
   and rated separately. Introduce a track identity layer; releases
   reference tracks; BPM/key/rating live on the track.
-- [ ] Split backup into **authored** data (track_meta, setlists,
-  store_items — irreplaceable) vs **derived** cache (releases, videos,
-  folders, tracklist, marketplace_stats — re-fetchable from Discogs).
-  Today `exportFullBackup()` (`src/backup.js`) mixes both in one blob.
-  Needs a backup-format version bump (ties into M2/M3/M4/M5 data-safety
-  bugs already in section 1).
+- [ ] Label the backup file, don't split it: keep `exportFullBackup()`
+  (`src/backup.js`) as **one** JSON file, but structure it so
+  **authored** data (track_meta, setlists, store_items — irreplaceable,
+  typed by hand) is clearly separated inside from **derived** data
+  (releases, videos, folders, tracklist, marketplace_stats —
+  re-fetchable from Discogs by re-syncing). Today both are flattened
+  together with no distinction. Needs a backup-format version bump
+  (ties into M2/M3/M4/M5 data-safety bugs already in section 1).
