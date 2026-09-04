@@ -169,6 +169,46 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 - [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
 - [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
 
+---
+
+## 3b. Desktop BPM/Key Analysis Helper
+
+Standalone native tool, separate from the web app. The web app has no way to
+download or decode YouTube audio (no CORS access, no local files for
+vinyl-only collectors) — this is the only path to real BPM/key data for a
+Discogs+YouTube collection, and it keeps the web app 100% serverless.
+
+**Not a web app feature.** Own repo or own top-level dir. Runs once per
+collection, occasionally after that for new adds.
+
+- **Stack:** Tauri (small binary, no bundled Chromium) wrapping a
+  PyInstaller-frozen Python sidecar (yt-dlp + Essentia).
+- **Input:** the JSON from `exportFullBackup()` (already exists, no new
+  export format).
+- **Pipeline per video:** yt-dlp downloads audio → skip if `track_meta`
+  already has `verified: true` or a set `bpm`/`key` → flag videos >10 min
+  or title-mismatched against `tracklist` for manual review instead of
+  auto-analyzing → `RhythmExtractor2013` (BPM + confidence) →
+  `KeyExtractor` with the `edma` profile (EDM-trained, better fit than
+  defaults) → key + scale + strength.
+- **Output:** JSON keyed the same way as `track_meta`
+  (`releaseId_youtubeId`), each record carries `bpm`, `key`, `confidence`,
+  `verified: false`. Same shape the Restore flow already accepts — no new
+  import code needed on the web side, or only a thin merge-by-confidence
+  step if one doesn't exist yet.
+- **Must have:** resumable (long runs, must survive interruption),
+  progress UI, never overwrite verified/manual entries without `--force`.
+- **Distribution:** signed builds (macOS notarization, ~$99/yr Apple dev
+  cert — unsigned macOS builds show a Gatekeeper block screen that kills
+  adoption) via GitHub Releases.
+- **License note:** Essentia is AGPLv3. Fine as a standalone local tool
+  never distributed as part of the MIT web app; don't import essentia.js
+  into the browser bundle without addressing the license.
+- **Effort:** M–L (cross-platform packaging + signing is most of it, the
+  analysis logic itself is small).
+
+---
+
 ### Proposed tiers
 
 | Tier | Price idea | Contents |
@@ -188,3 +228,4 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 5. **M-4 Monetization:** B1, P2, P7 + Stripe/license gating.
 6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
 7. **M-6 AI wave 2 + community features:** F2, F3, F5, F6, F8, F12, F13, F14 + PWA (P5).
+8. **M-7 Desktop analysis helper:** section 3b — unblocks real BPM/key data (and F4) for friends/users without a backend.
