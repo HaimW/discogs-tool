@@ -169,6 +169,55 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 - [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
 - [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
 
+---
+
+## 3b. Desktop BPM/Key Analysis Helper
+
+Standalone native tool, separate from the web app. The web app has no way to
+download or decode YouTube audio (no CORS access, no local files for
+vinyl-only collectors) — this is the only path to real BPM/key data for a
+Discogs+YouTube collection, and it keeps the web app 100% serverless.
+
+**Not a web app feature.** Own repo or own top-level dir. Runs once per
+collection, occasionally after that for new adds.
+
+- **Stack:** pure Rust, no Python. Tauri shell (small binary, no bundled
+  Chromium) + native Rust analysis, faster startup and no PyInstaller
+  freeze/packaging fragility.
+  - **Download:** yt-dlp's official standalone binary, bundled as a Tauri
+    sidecar. Still the right tool for surviving YouTube's changes — no
+    reason to reimplement it, and the standalone binary needs no Python
+    install on the friend's machine.
+  - **BPM:** `aubio-rs` (Rust bindings to the aubio C library) — fast,
+    proven onset/tempo detection.
+  - **Key:** `libkeyfinder` via Rust FFI (bindgen + a thin wrapper) — the
+    same algorithm family behind Mixed In Key-style DJ tools, a strong
+    fit for this specific use case.
+- **Input:** the JSON from `exportFullBackup()` (already exists, no new
+  export format).
+- **Pipeline per video:** yt-dlp downloads audio → skip if `track_meta`
+  already has `verified: true` or a set `bpm`/`key` → flag videos >10 min
+  or title-mismatched against `tracklist` for manual review instead of
+  auto-analyzing → aubio for BPM + confidence → libkeyfinder for key +
+  scale + strength.
+- **Output:** JSON keyed the same way as `track_meta`
+  (`releaseId_youtubeId`), each record carries `bpm`, `key`, `confidence`,
+  `verified: false`. Same shape the Restore flow already accepts — no new
+  import code needed on the web side, or only a thin merge-by-confidence
+  step if one doesn't exist yet.
+- **Must have:** resumable (long runs, must survive interruption),
+  progress UI, never overwrite verified/manual entries without `--force`.
+- **Distribution:** signed builds (macOS notarization, ~$99/yr Apple dev
+  cert — unsigned macOS builds show a Gatekeeper block screen that kills
+  adoption) via GitHub Releases.
+- **License note:** check `libkeyfinder`'s license (GPL family) before
+  deciding how the helper binary itself is distributed/sold — separate
+  concern from the web app, which stays MIT and never bundles this code.
+- **Effort:** M (the `libkeyfinder` FFI bindings are the main one-time
+  cost; everything else is straightforward wiring).
+
+---
+
 ### Proposed tiers
 
 | Tier | Price idea | Contents |
@@ -188,3 +237,4 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 5. **M-4 Monetization:** B1, P2, P7 + Stripe/license gating.
 6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
 7. **M-6 AI wave 2 + community features:** F2, F3, F5, F6, F8, F12, F13, F14 + PWA (P5).
+8. **M-7 Desktop analysis helper:** section 3b — unblocks real BPM/key data (and F4) for friends/users without a backend.
