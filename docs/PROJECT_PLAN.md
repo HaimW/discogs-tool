@@ -181,16 +181,25 @@ Discogs+YouTube collection, and it keeps the web app 100% serverless.
 **Not a web app feature.** Own repo or own top-level dir. Runs once per
 collection, occasionally after that for new adds.
 
-- **Stack:** Tauri (small binary, no bundled Chromium) wrapping a
-  PyInstaller-frozen Python sidecar (yt-dlp + Essentia).
+- **Stack:** pure Rust, no Python. Tauri shell (small binary, no bundled
+  Chromium) + native Rust analysis, faster startup and no PyInstaller
+  freeze/packaging fragility.
+  - **Download:** yt-dlp's official standalone binary, bundled as a Tauri
+    sidecar. Still the right tool for surviving YouTube's changes — no
+    reason to reimplement it, and the standalone binary needs no Python
+    install on the friend's machine.
+  - **BPM:** `aubio-rs` (Rust bindings to the aubio C library) — fast,
+    proven onset/tempo detection.
+  - **Key:** `libkeyfinder` via Rust FFI (bindgen + a thin wrapper) — the
+    same algorithm family behind Mixed In Key-style DJ tools, a strong
+    fit for this specific use case.
 - **Input:** the JSON from `exportFullBackup()` (already exists, no new
   export format).
 - **Pipeline per video:** yt-dlp downloads audio → skip if `track_meta`
   already has `verified: true` or a set `bpm`/`key` → flag videos >10 min
   or title-mismatched against `tracklist` for manual review instead of
-  auto-analyzing → `RhythmExtractor2013` (BPM + confidence) →
-  `KeyExtractor` with the `edma` profile (EDM-trained, better fit than
-  defaults) → key + scale + strength.
+  auto-analyzing → aubio for BPM + confidence → libkeyfinder for key +
+  scale + strength.
 - **Output:** JSON keyed the same way as `track_meta`
   (`releaseId_youtubeId`), each record carries `bpm`, `key`, `confidence`,
   `verified: false`. Same shape the Restore flow already accepts — no new
@@ -201,11 +210,11 @@ collection, occasionally after that for new adds.
 - **Distribution:** signed builds (macOS notarization, ~$99/yr Apple dev
   cert — unsigned macOS builds show a Gatekeeper block screen that kills
   adoption) via GitHub Releases.
-- **License note:** Essentia is AGPLv3. Fine as a standalone local tool
-  never distributed as part of the MIT web app; don't import essentia.js
-  into the browser bundle without addressing the license.
-- **Effort:** M–L (cross-platform packaging + signing is most of it, the
-  analysis logic itself is small).
+- **License note:** check `libkeyfinder`'s license (GPL family) before
+  deciding how the helper binary itself is distributed/sold — separate
+  concern from the web app, which stays MIT and never bundles this code.
+- **Effort:** M (the `libkeyfinder` FFI bindings are the main one-time
+  cost; everything else is straightforward wiring).
 
 ---
 
