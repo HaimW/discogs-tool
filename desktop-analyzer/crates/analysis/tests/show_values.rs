@@ -36,14 +36,7 @@ fn chord(freqs: &[f32], seconds: f64) -> Vec<f32> {
 #[test]
 fn show_detected_values() {
     for target in [90.0, 120.0, 128.0, 174.0] {
-        // Unfolded on purpose: this test measures what the detector reports,
-        // and folding would hide an octave error rather than show it.
-        let t = analyzer_analysis::bpm::detect(
-            &click_track(target, 30.0),
-            SR,
-            analyzer_analysis::bpm::TempoBand::unfolded(),
-        )
-        .unwrap();
+        let t = analyzer_analysis::bpm::detect(&click_track(target, 30.0), SR).unwrap();
         println!(
             "click {target:>5.0} BPM -> detected {:>7.2} (confidence {:.3})",
             t.bpm, t.confidence

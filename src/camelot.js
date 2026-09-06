@@ -86,12 +86,60 @@ function camelotChip(code, opts) {
     if (!e) return '';
     opts = opts || {};
     var title = e.musical + (opts.estimated ? ' — estimated by analysis' : '');
+    // The musical name rides inside the coloured chip rather than beside it, so
+    // "8B" and "C major" stay one object: they are two notations for the same
+    // fact, and splitting them into separate badges reads as two pieces of
+    // information. `opts.musical` is the name to show — passed in rather than
+    // taken from the table, so a record whose stored name disagrees with the
+    // table shows what was actually stored.
+    var musical = opts.musical === true ? e.musical : opts.musical;
     return '<span class="track-badge badge-key camelot-chip' +
         (opts.estimated ? ' camelot-chip-estimated' : '') +
         '" style="background:' + e.color + ';color:' + e.fg + ';border-color:' + e.color + '"' +
         ' title="' + escHtml(title) + '">' +
         escHtml(e.code) + (opts.estimated ? '<span class="camelot-est">~</span>' : '') +
+        (musical ? '<span class="camelot-musical">' + escHtml(musical) + '</span>' : '') +
         '</span>';
+}
+
+// The tempo badge, marked as an estimate unless a human has confirmed it.
+//
+// Kept separate from the key chip because the two answer different questions:
+// `camelotChip` also carries the Camelot colour, while this is just a number
+// that must not look more certain than it is. After an analyzer run nearly
+// every value is an estimate, so an unmarked figure would be actively
+// misleading.
+function bpmBadge(meta) {
+    if (meta.bpm == null || meta.bpm === '') return '';
+    var estimated = meta.bpm_source === 'analysis' && !meta.bpm_verified;
+    var title = estimated
+        ? 'Estimated by analysis' +
+          (meta.bpm_confidence != null ? ' — confidence ' + pct(meta.bpm_confidence) : '')
+        : 'BPM';
+    return '<span class="track-badge badge-bpm' + (estimated ? ' badge-estimated' : '') +
+        '" title="' + escHtml(title) + '">' +
+        escHtml(String(meta.bpm)) + ' BPM' +
+        (estimated ? '<span class="badge-est">~</span>' : '') +
+        '</span>';
+}
+
+// The 1-10 energy figure, shown as a compact meter plus its number.
+//
+// It is a rank within your own collection, not an absolute measurement, so the
+// bar is the honest rendering: it says "this end of my records" rather than
+// implying a unit. The tooltip says so outright, because a bare number invites
+// the opposite reading.
+function energyBadge(meta) {
+    if (!meta || meta.energy == null || meta.energy === '') return '';
+    var level = Math.max(1, Math.min(10, parseInt(meta.energy, 10) || 0));
+    if (!level) return '';
+    var estimated = meta.energy_source === 'analysis' && !meta.bpm_verified;
+    var title = (estimated ? 'Energy ' + level + '/10, estimated — a rank within your collection'
+                           : 'Energy ' + level + '/10');
+    return '<span class="track-badge badge-energy' + (estimated ? ' badge-estimated' : '') +
+        '" title="' + escHtml(title) + '">' +
+        '<span class="energy-meter" aria-hidden="true"><span style="width:' + (level * 10) + '%"></span></span>' +
+        level + '</span>';
 }
 
 // The wheel itself: two concentric rings of twelve segments, minor (A) inside

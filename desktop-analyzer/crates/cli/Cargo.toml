@@ -23,6 +23,11 @@ analyzer-analysis = { path = "../analysis" }
 analyzer-download = { path = "../download" }
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
+# The local UI serves JSON to a page it also serves. No HTTP crate and no async
+# runtime: the server is a hundred lines of std::net in `ui/`, because the whole
+# point of this tool is that it is one binary you can hand to someone.
+serde_json.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

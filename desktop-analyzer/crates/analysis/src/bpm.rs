@@ -33,50 +33,6 @@ const MIN_BEATS_FOR_FIT: usize = 8;
 /// tempo change: excluded from the fit, and counted against the confidence.
 const INTERVAL_TOLERANCE: f64 = 0.10;
 
-/// Default lower edge of the fold band. 85 puts the window at 85-170, which
-/// holds house, techno, disco, electro and breaks at their notated tempo.
-pub const DEFAULT_TEMPO_MIN: f64 = 85.0;
-
-/// The one-octave window a detected tempo is folded into.
-///
-/// The window is always exactly 2:1 (`min` to `2 * min`). That is what makes
-/// folding well defined: every beat grid has exactly one octave inside it, so
-/// the result does not depend on which direction you approach from, and
-/// re-analysing a track cannot produce a different answer.
-///
-/// **Where the window sits is a genre judgement, and the tool cannot make it.**
-/// A reading of 76 in a house collection is half of 152; in a hip hop
-/// collection it is simply 76. Whoever knows the records decides, which is why
-/// this is a parameter and not a constant.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TempoBand {
-    min: Option<f64>,
-}
-
-impl TempoBand {
-    /// A band running from `min` to `2 * min`. A non-positive or non-finite
-    /// `min` disables folding, which is the honest response to being asked for
-    /// a window that does not exist.
-    pub fn from_min(min: f64) -> Self {
-        TempoBand { min: (min.is_finite() && min > 0.0).then_some(min) }
-    }
-
-    /// Report tempos exactly as the beat grid gives them, octave and all.
-    pub fn unfolded() -> Self {
-        TempoBand { min: None }
-    }
-
-    pub fn min(&self) -> Option<f64> {
-        self.min
-    }
-}
-
-impl Default for TempoBand {
-    fn default() -> Self {
-        TempoBand::from_min(DEFAULT_TEMPO_MIN)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tempo {
     pub bpm: f64,
@@ -94,13 +50,6 @@ pub struct Tempo {
     pub confidence_raw: f64,
     /// How many beats the grid was fitted through.
     pub beats: usize,
-    /// The tempo before octave folding, when folding changed it. `None` means
-    /// the fitted grid was already in band and the reported figure is untouched.
-    ///
-    /// Kept because folding is the one step here that overrules the measurement
-    /// rather than refining it: if the band is ever wrong for a track, this is
-    /// what lets you see it without re-running the analysis.
-    pub folded_from: Option<f64>,
 }
 
 #[derive(Debug)]
@@ -128,7 +77,7 @@ impl std::fmt::Display for BpmError {
 impl std::error::Error for BpmError {}
 
 /// Detect the tempo of mono audio.
-pub fn detect(samples: &[f32], sample_rate: u32, band: TempoBand) -> Result<Tempo, BpmError> {
+pub fn detect(samples: &[f32], sample_rate: u32) -> Result<Tempo, BpmError> {
     if samples.len() < BUF_SIZE as usize {
         return Err(BpmError::TooShort { samples: samples.len() });
     }
@@ -143,20 +92,10 @@ pub fn detect(samples: &[f32], sample_rate: u32, band: TempoBand) -> Result<Temp
 
     // aubio reports 0 when it never locked onto a beat, and anything outside
     // this range is not a tempo any DJ tool should record.
-    //
-    // Deliberately checked BEFORE folding, which makes the two ends asymmetric:
-    // a grid at 10 BPM is rejected, but one at 40 is folded up to 160. That is
-    // the intended bias. Folding assumes the grid is right and only its octave
-    // is wrong, and past a few octaves out that assumption stops holding — a
-    // reading of 340 is far more likely to be a detector that never locked than
-    // a real 170 seen doubled. Refusing beats inventing a plausible number.
     if !(20.0..=300.0).contains(&fitted) {
         return Err(BpmError::Implausible { bpm: fitted });
     }
-
-    let bpm = fold_to_octave(fitted, band);
-    let folded_from = (bpm != fitted).then_some(fitted);
-    Ok(Tempo { bpm, confidence, confidence_raw: raw_conf, beats: beats.len(), folded_from })
+    Ok(Tempo { bpm: fitted, confidence, confidence_raw: raw_conf, beats: beats.len() })
 }
 
 /// Push the audio through aubio and collect every beat position, in samples.
@@ -301,32 +240,6 @@ fn fit_grid(beats: &[f64], sample_rate: u32, seed_bpm: f64) -> Option<(f64, f64)
 /// Only powers of two are applied. Triplet (3x) errors exist but correcting
 /// them needs evidence this function does not have, and guessing would turn a
 /// genuine 90 BPM record into 135.
-pub(crate) fn fold_into(bpm: f64, band: TempoBand) -> f64 {
-    fold_to_octave(bpm, band)
-}
-
-fn fold_to_octave(bpm: f64, band: TempoBand) -> f64 {
-    let Some(min) = band.min() else { return bpm };
-    if !bpm.is_finite() || bpm <= 0.0 {
-        return bpm;
-    }
-    let max = min * 2.0;
-    let mut out = bpm;
-    // A 2:1 window means one of these branches always lands, so the loop
-    // terminates; the bound guards against a pathological input rather than a
-    // bad band.
-    for _ in 0..32 {
-        if out < min {
-            out *= 2.0;
-        } else if out >= max {
-            out /= 2.0;
-        } else {
-            break;
-        }
-    }
-    out
-}
-
 fn median_of(values: &[f64]) -> Option<f64> {
     if values.is_empty() {
         return None;
@@ -352,109 +265,6 @@ mod tests {
 
     const SR: u32 = 44_100;
 
-    #[test]
-    fn a_tempo_already_in_band_is_left_exactly_alone() {
-        // Equality, not approximate: folding must be a no-op here, or every
-        // reported BPM would drift by a rounding error for no reason.
-        let band = TempoBand::default();
-        for bpm in [85.0, 120.0, 128.0, 152.0, 169.9] {
-            assert_eq!(fold_to_octave(bpm, band), bpm, "{bpm} should not move");
-        }
-    }
-
-    #[test]
-    fn half_and_quarter_time_readings_are_pulled_back_up() {
-        // Both figures are real: they came out of this collection at
-        // confidence 0.76 and 0.00 respectively.
-        let band = TempoBand::default();
-        assert!((fold_to_octave(76.02, band) - 152.04).abs() < 1e-9);
-        assert!((fold_to_octave(40.69, band) - 162.76).abs() < 1e-9);
-    }
-
-    #[test]
-    fn double_time_readings_are_pulled_back_down() {
-        let band = TempoBand::default();
-        assert!((fold_to_octave(244.0, band) - 122.0).abs() < 1e-9);
-        assert!((fold_to_octave(184.86, band) - 92.43).abs() < 1e-9);
-    }
-
-    #[test]
-    fn the_band_edges_belong_to_exactly_one_octave() {
-        // Half-open [min, 2*min): the top edge folds down, the bottom stays.
-        // If both edges were inclusive, 170 would have two valid answers.
-        let band = TempoBand::from_min(85.0);
-        assert_eq!(fold_to_octave(85.0, band), 85.0);
-        assert!((fold_to_octave(170.0, band) - 85.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn folding_is_idempotent() {
-        // Running it twice must not move a value again, or a re-analysed track
-        // would disagree with the first pass.
-        let band = TempoBand::default();
-        for bpm in [40.69, 76.02, 122.0, 244.0, 350.0] {
-            let once = fold_to_octave(bpm, band);
-            assert_eq!(fold_to_octave(once, band), once, "{bpm} moved on the second fold");
-        }
-    }
-
-    #[test]
-    fn folding_always_lands_in_band() {
-        let band = TempoBand::default();
-        for bpm in [20.0, 33.3, 41.0, 99.9, 181.0, 300.0] {
-            let folded = fold_to_octave(bpm, band);
-            assert!(
-                (DEFAULT_TEMPO_MIN..DEFAULT_TEMPO_MIN * 2.0).contains(&folded),
-                "{bpm} folded to {folded}, outside the band"
-            );
-        }
-    }
-
-    #[test]
-    fn a_drum_and_bass_band_keeps_174_and_lifts_87() {
-        // The genre judgement in action: the same 87 BPM grid is right in one
-        // collection and a half-time error in the other.
-        let dnb = TempoBand::from_min(90.0); // 90-180
-        assert_eq!(fold_to_octave(174.0, dnb), 174.0);
-        assert!((fold_to_octave(87.0, dnb) - 174.0).abs() < 1e-9);
-
-        let house = TempoBand::default(); // 85-170
-        assert!((fold_to_octave(174.0, house) - 87.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn an_unfolded_band_reports_the_grid_untouched() {
-        let raw = TempoBand::unfolded();
-        for bpm in [40.69, 76.02, 244.0] {
-            assert_eq!(fold_to_octave(bpm, raw), bpm);
-        }
-    }
-
-    #[test]
-    fn a_nonsense_band_disables_folding_rather_than_hanging() {
-        for min in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            let band = TempoBand::from_min(min);
-            assert_eq!(band.min(), None);
-            assert_eq!(fold_to_octave(40.69, band), 40.69);
-        }
-    }
-
-    #[test]
-    fn a_reading_far_outside_any_octave_is_refused_not_folded() {
-        // 0.5 BPM is not a 128 BPM track seen eight octaves down, it is a
-        // detector that never locked on. Folding it would manufacture a
-        // confident-looking answer out of nothing.
-        let grid: Vec<f64> = (0..64).map(|i| i as f64 * 120.0 * SR as f64).collect();
-        assert!(fit_grid(&grid, SR, 0.5).is_none());
-    }
-
-    #[test]
-    fn folding_refuses_to_touch_nonsense() {
-        let band = TempoBand::default();
-        assert_eq!(fold_to_octave(0.0, band), 0.0);
-        assert!(fold_to_octave(f64::NAN, band).is_nan());
-    }
-
     /// Beat positions for `count` beats at `bpm`, with an optional constant
     /// offset applied to every beat and an optional set of dropped indices.
     fn grid(bpm: f64, count: usize, offset: f64, drop_every: Option<usize>) -> Vec<f64> {
@@ -463,6 +273,13 @@ mod tests {
             .filter(|i| drop_every.is_none_or(|d| i % d != 0 || *i == 0))
             .map(|i| i as f64 * period + offset)
             .collect()
+    }
+
+    #[test]
+    fn a_reading_far_outside_any_range_is_refused() {
+        // 0.5 BPM is a detector that never locked on, not a slow record.
+        let positions: Vec<f64> = (0..64).map(|i| i as f64 * 120.0 * SR as f64).collect();
+        assert!(fit_grid(&positions, SR, 0.5).is_none());
     }
 
     #[test]

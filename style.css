@@ -840,7 +840,7 @@ a:hover { color: var(--accent-hover); }
    that matters when you are looking for a tempo. */
 .track-badges {
     display: inline-flex; flex-wrap: nowrap; gap: 4px;
-    flex: 0 0 auto; width: 190px; justify-content: flex-start;
+    flex: 0 0 auto; width: 290px; justify-content: flex-start;
 }
 /* Below the fixed column's width there is no room to reserve it, so the badges
    fall back to sitting against whatever is left of the title. */
@@ -862,6 +862,31 @@ a:hover { color: var(--accent-hover); }
 .track-badge.badge-key { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
 .track-badge.badge-rating { color: var(--accent); letter-spacing: 1px; }
 .track-badge.badge-shelf { color: #6aa; border-color: #334; }
+
+/* The musical name lives inside the key chip, separated by a hairline rather
+   than a gap, so the two notations read as one fact rather than two badges. */
+.camelot-chip { display: inline-flex; align-items: center; gap: 5px; }
+.camelot-musical {
+    font-size: 9px; font-weight: 400; opacity: 0.72;
+    padding-left: 5px; border-left: 1px solid currentColor;
+}
+
+/* Energy: the meter carries the reading, the number confirms it. A bar rather
+   than a bare figure because the value is a rank within the collection, not a
+   measurement in any unit — a filled bar says "this end of my records" in a way
+   that "7" does not. */
+.track-badge.badge-energy {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--text-muted); border-color: var(--border);
+}
+.energy-meter {
+    display: inline-block; width: 26px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.14); overflow: hidden;
+}
+.energy-meter > span {
+    display: block; height: 100%; border-radius: 2px;
+    background: linear-gradient(90deg, var(--accent), #e4585d);
+}
 
 /* Vinyl tracklist panel: the same badges, smaller, on the printed-label side of
    the release page. The row is a grid so position, title and badges line up
@@ -970,6 +995,17 @@ a:hover { color: var(--accent-hover); }
     padding: 8px 10px; border-radius: var(--radius-sm);
     background: var(--bg-surface); border: 1px solid var(--border);
 }
+/* A reading the two detectors could not agree on. Marked, because this is the
+   one case where the number in the field above is a guess rather than a
+   measurement, and the editor is where you would correct it. */
+.meta-provenance-warn { border-color: var(--accent); }
+.meta-provenance .mp-head { margin-bottom: 6px; }
+.meta-provenance .mp-rows {
+    display: grid; grid-template-columns: auto 1fr; gap: 2px 10px;
+    margin: 0; font-family: var(--font-mono); font-size: 10px;
+}
+.meta-provenance .mp-rows dt { color: var(--text-dim); white-space: nowrap; }
+.meta-provenance .mp-rows dd { margin: 0; color: var(--text-muted); }
 
 /* ============ BACKUP PAGE ============ */
 
@@ -1422,3 +1458,42 @@ body { padding-bottom: var(--player-height); }
 .modal-note { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
 .modal-form { margin-bottom: 20px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+
+
+/* ============ DESKTOP ANALYZER ============ */
+
+.analyzer-lede { color: var(--text-muted); font-size: 14px; max-width: 620px; margin-top: 6px; }
+.analyzer-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-top: 20px; max-width: 780px;
+}
+.analyzer-card h2 { font-size: 16px; display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.analyzer-card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.1px;
+    color: var(--text-dim); margin: 20px 0 8px; }
+.analyzer-card p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+.analyzer-card code { font-family: var(--font-mono); font-size: 12px; color: var(--accent); }
+/* A live indicator, because "Connected" on its own is a claim rather than a state. */
+.analyzer-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow); flex-shrink: 0;
+}
+.analyzer-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px; margin: 16px 0; }
+.analyzer-grid .wide { grid-column: 1 / -1; }
+.analyzer-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.analyzer-planline { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.analyzer-steps { color: var(--text-muted); font-size: 13px; line-height: 1.9; padding-left: 20px; }
+.analyzer-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin: 14px 0 8px; }
+.analyzer-bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+.analyzer-stats { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); }
+.analyzer-cmd {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 12px; margin: 10px 0; overflow-x: auto;
+    font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+}
+.analyzer-log {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px; margin-top: 12px; max-height: 220px; overflow-y: auto;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+    color: var(--text-muted); white-space: pre-wrap;
+}

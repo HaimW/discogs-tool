@@ -24,6 +24,7 @@ mod ffi {
 use std::path::Path;
 
 use analyzer_core::meta::AnalysisResult;
+use analyzer_core::tempo::{SecondOpinion, TempoHint};
 
 /// Everything we learned about one audio file.
 #[derive(Debug, Clone)]
@@ -41,8 +42,6 @@ pub struct Analysis {
     /// separately because the 1-10 bucket is too coarse to rank a collection
     /// by, and ranking is what the figure is finally calibrated against.
     pub energy_score: Option<f64>,
-    /// The tempo before octave folding, when folding moved it.
-    pub bpm_folded_from: Option<f64>,
     /// How the reported tempo was arrived at. See [`TempoMethod`].
     pub bpm_method: TempoMethod,
     /// The independent estimate, when one was taken. Kept whether or not it
@@ -62,7 +61,6 @@ impl Analysis {
             key_strength: self.key_strength,
             energy: self.energy,
             energy_score: self.energy_score,
-            bpm_folded_from: self.bpm_folded_from,
             bpm_method: Some(self.bpm_method.as_str().to_string()),
             bpm_second_opinion: self.bpm_second_opinion,
             analyzed_at: analyzed_at.into(),
@@ -123,71 +121,135 @@ impl std::fmt::Display for AnalysisError {
 impl std::error::Error for AnalysisError {}
 
 /// Decode and analyse one audio file.
-pub fn analyze_file(path: &Path, band: bpm::TempoBand) -> Result<Analysis, AnalysisError> {
-    analyze_file_with(path, band, false)
+pub fn analyze_file(path: &Path) -> Result<Analysis, AnalysisError> {
+    analyze_file_with(path, SecondOpinion::default(), TempoHint::default())
 }
 
-/// Decode and analyse one audio file, optionally taking a second opinion on the
-/// tempo. See [`analyze_samples_with`].
+/// Decode and analyse one audio file under a given cross-checking policy.
+/// See [`analyze_samples_with`].
 pub fn analyze_file_with(
     path: &Path,
-    band: bpm::TempoBand,
-    syncopated: bool,
+    policy: SecondOpinion,
+    hint: TempoHint,
 ) -> Result<Analysis, AnalysisError> {
     let audio = decode::decode_file(path).map_err(AnalysisError::Decode)?;
-    analyze_samples_with(&audio.samples, audio.sample_rate, band, syncopated)
+    analyze_samples_with(&audio.samples, audio.sample_rate, policy, hint)
 }
 
 /// Analyse mono samples that are already in memory.
-pub fn analyze_samples(
-    samples: &[f32],
-    sample_rate: u32,
-    band: bpm::TempoBand,
-) -> Result<Analysis, AnalysisError> {
-    analyze_samples_with(samples, sample_rate, band, false)
+pub fn analyze_samples(samples: &[f32], sample_rate: u32) -> Result<Analysis, AnalysisError> {
+    analyze_samples_with(samples, sample_rate, SecondOpinion::default(), TempoHint::default())
 }
 
-/// Below this grid agreement, a syncopated track gets a second opinion.
+/// Confidence below which [`SecondOpinion::Unsure`] asks for a cross-check.
 ///
-/// Set where it is because a causal beat tracker that has locked onto the wrong
-/// pulse still reports a *consistent* grid — the confidence stays middling
-/// rather than collapsing. The jungle tracks that prompted this scored 0.64 to
-/// 0.76 while counting something that was not the beat.
+/// Only consulted under that policy. The default is to cross-check regardless,
+/// because a beat tracker locked onto the wrong pulse reports a *consistent*
+/// grid and so stays confident — see [`SecondOpinion`].
 pub const SECOND_OPINION_BELOW: f64 = 0.85;
+
+/// How much of the front of a track is skipped when reading its tempo.
+///
+/// Intros lie. They open beatless, or half-time, or on a loop that is not the
+/// groove — and a detector fed the whole file has to reconcile that with the
+/// body. Measured on one 338-second track: the first 30 seconds read 129.50
+/// while every window after it read 168, and the whole-file figure came out at
+/// 128.28 with its confidence collapsed to 0.11. Reading the body instead
+/// turns that into a coherent answer.
+///
+/// Proportional rather than fixed, because a 3-minute edit and a 12-minute
+/// version do not have intros of the same length, and capped so a long track
+/// does not lose minutes of perfectly good groove.
+const INTRO_FRACTION: f64 = 0.12;
+const INTRO_CAP_SECONDS: f64 = 45.0;
+
+/// The same at the end, for outros that break down or run to silence. Smaller,
+/// because an outro usually keeps the groove longer than an intro withholds it.
+const OUTRO_FRACTION: f64 = 0.08;
+const OUTRO_CAP_SECONDS: f64 = 30.0;
+
+/// Below this much remaining audio the trim is abandoned and the whole track is
+/// read. A short edit has no intro to spare, and a bad tempo from too little
+/// audio is worse than one contaminated by an intro.
+const MIN_BODY_SECONDS: f64 = 60.0;
+
+/// The stretch of a track its tempo should be read from: the body, with any
+/// intro and outro trimmed off. Falls back to the whole slice when there is not
+/// enough audio to spare.
+fn tempo_body(samples: &[f32], sample_rate: u32) -> &[f32] {
+    if sample_rate == 0 || samples.is_empty() {
+        return samples;
+    }
+    let rate = sample_rate as f64;
+    let duration = samples.len() as f64 / rate;
+    let intro = (duration * INTRO_FRACTION).min(INTRO_CAP_SECONDS);
+    let outro = (duration * OUTRO_FRACTION).min(OUTRO_CAP_SECONDS);
+    if duration - intro - outro < MIN_BODY_SECONDS {
+        return samples;
+    }
+    let from = (intro * rate) as usize;
+    let to = samples.len() - (outro * rate) as usize;
+    if to <= from {
+        return samples;
+    }
+    &samples[from..to]
+}
 
 /// Two tempos this close are the same tempo.
 const AGREEMENT_TOLERANCE: f64 = 0.03;
 
-/// Ratios a beat tracker plausibly miscounts by: half and double bars, and the
-/// triplet relations that a shuffled break invites.
-const METRICAL_RATIOS: &[f64] = &[2.0, 0.5, 1.5, 2.0 / 3.0, 3.0, 1.0 / 3.0, 4.0, 0.25];
+/// Ratios a beat tracker plausibly miscounts by.
+///
+/// **Octave relations only.** A beat tracker locking onto every other beat, or
+/// every fourth, is a real and well-understood failure — Physical Therapy's
+/// "More Sugar" is a 170 BPM record read as 85.
+///
+/// 3:2 and 4:3 were briefly included, and had to be removed. Edward's "Bebe"
+/// is a 120 BPM record: the beat grid reports 120.1 to 120.2 in all thirteen
+/// windows of it at 0.94 to 0.98 confidence, while the independent estimate
+/// reports 159.9 at a strength of only 0.26 to 0.36, and agrees with 120 in the
+/// windows where its strength rises. A 4:3 rule promoted that artefact over a
+/// solid measurement and reported 160.46.
+///
+/// The lesson generalises: the autocorrelation finds real periodicities that
+/// are not the beat — three-against-four percussion is ordinary in house — so a
+/// simple ratio between the two figures is not evidence that the *grid* is the
+/// one that is wrong. Only the octave relations are trusted to overrule it, and
+/// everything else is reported as a dispute for a human to settle.
+const METRICAL_RATIOS: &[f64] = &[2.0, 0.5, 4.0, 0.25];
 
 /// How convincing the independent estimate must be before it is allowed to
 /// overrule a grid it has no musical relation to.
 const OVERRULE_STRENGTH: f64 = 0.5;
 
-/// Analyse mono samples, optionally taking a second opinion on the tempo.
+/// Analyse mono samples under a given cross-checking policy.
 ///
-/// `syncopated` comes from the release's styles: breaks, jungle and their
-/// relatives, where the beat tracker is known to lock onto the wrong pulse. The
-/// second estimate costs an extra pass over the audio, so it is not taken for
-/// the four-to-the-floor material that makes up most of a collection.
+/// Tempo is read from the body of the track — see [`tempo_body`] — while key
+/// and energy still see the whole of it. A key is a property of the whole
+/// record and an intro is part of it; a tempo is a property of the groove, and
+/// an intro that is not the groove is exactly the problem.
 pub fn analyze_samples_with(
     samples: &[f32],
     sample_rate: u32,
-    band: bpm::TempoBand,
-    syncopated: bool,
+    policy: SecondOpinion,
+    hint: TempoHint,
 ) -> Result<Analysis, AnalysisError> {
-    let tempo = bpm::detect(samples, sample_rate, band).map_err(AnalysisError::Bpm)?;
+    let body = tempo_body(samples, sample_rate);
+    let tempo = bpm::detect(body, sample_rate).map_err(AnalysisError::Bpm)?;
     let detected = key::detect(samples, sample_rate).map_err(AnalysisError::Key)?;
     // Energy is a nice-to-have: a track we could tempo- and key-detect but not
     // score for energy is still a useful result, so this never fails the run.
     let energy = energy::estimate(samples, sample_rate);
 
-    let second = (syncopated && tempo.confidence < SECOND_OPINION_BELOW)
-        .then(|| autocorr::estimate(samples, sample_rate, band))
-        .flatten();
-    let verdict = reconcile(tempo.bpm, tempo.confidence, second);
+    let wanted = match policy {
+        SecondOpinion::Always => true,
+        SecondOpinion::Unsure => tempo.confidence < SECOND_OPINION_BELOW,
+        SecondOpinion::Never => false,
+    };
+    // Both detectors read the same stretch of audio, or a disagreement between
+    // them would just be a disagreement about which part of the track it is.
+    let second = wanted.then(|| autocorr::estimate(body, sample_rate)).flatten();
+    let verdict = reconcile(tempo.bpm, tempo.confidence, second, hint.steady_pulse);
 
     Ok(Analysis {
         bpm: round2(verdict.bpm),
@@ -200,7 +262,6 @@ pub fn analyze_samples_with(
         key_segments: detected.segments,
         energy: energy.map(|e| e.level),
         energy_score: energy.map(|e| round3(e.score)),
-        bpm_folded_from: tempo.folded_from.map(round2),
         bpm_method: verdict.method,
         bpm_second_opinion: second.map(|e| round2(e.bpm)),
         duration_seconds: samples.len() as f64 / sample_rate.max(1) as f64,
@@ -220,7 +281,12 @@ struct Verdict {
 /// cannot count the wrong pulse but is imprecise. So wherever they can be
 /// reconciled, the grid supplies the number and the second estimate supplies
 /// only the decision about which pulse that number describes.
-fn reconcile(grid_bpm: f64, grid_confidence: f64, second: Option<autocorr::Estimate>) -> Verdict {
+fn reconcile(
+    grid_bpm: f64,
+    grid_confidence: f64,
+    second: Option<autocorr::Estimate>,
+    steady_pulse: bool,
+) -> Verdict {
     let Some(second) = second else {
         return Verdict { bpm: grid_bpm, confidence: grid_confidence, method: TempoMethod::BeatGrid };
     };
@@ -239,23 +305,35 @@ fn reconcile(grid_bpm: f64, grid_confidence: f64, second: Option<autocorr::Estim
         };
     }
 
-    // They differ by a musical ratio: the grid was counting half-bars or
-    // triplets. Keep its precision and move it onto the right pulse.
-    for ratio in METRICAL_RATIOS {
-        if (second.bpm / (grid_bpm * ratio) - 1.0).abs() <= AGREEMENT_TOLERANCE {
-            return Verdict {
-                bpm: grid_bpm * ratio,
-                confidence: grid_confidence,
-                method: TempoMethod::Rescaled,
-            };
+    // They differ by an octave: the grid was counting every other beat. Keep its
+    // precision and move it onto the right pulse — but only on a second opinion
+    // strong enough to be worth acting on. Rescaling used to skip that check
+    // while overruling required it, which let a 0.30-strength artefact rewrite
+    // a reading the grid was 0.97 confident of.
+    // On material without a steady pulse — a ballad, a jazz record, anything
+    // that is not built on a four-to-the-floor kick — the two detectors
+    // disagreeing is not evidence that one of them miscounted an octave. It is
+    // evidence that the track has no single obvious pulse, and the useful answer
+    // is to say so rather than to pick. Genres feed this decision and nothing
+    // else: they never change a number.
+    if steady_pulse && second.strength >= OVERRULE_STRENGTH {
+        for ratio in METRICAL_RATIOS {
+            if (second.bpm / (grid_bpm * ratio) - 1.0).abs() <= AGREEMENT_TOLERANCE {
+                return Verdict {
+                    bpm: grid_bpm * ratio,
+                    confidence: grid_confidence,
+                    method: TempoMethod::Rescaled,
+                };
+            }
         }
     }
 
-    // No relation at all. On syncopated material a strong global periodicity is
-    // the better bet than a tracker that has already told us it is unsure — but
-    // only when it is genuinely strong, and the result is still marked as the
-    // guess it is.
-    if second.strength >= OVERRULE_STRENGTH {
+    // No relation at all. A strong global periodicity is the better bet than a
+    // tracker that has already told us it is unsure — but only then. A grid the
+    // detector is confident of is a measurement, and an unrelated periodicity is
+    // not evidence against it: Edward's "Bebe" reports 120 at 0.97 confidence in
+    // every window, and the 159.9 beside it is percussion, not tempo.
+    if steady_pulse && second.strength >= OVERRULE_STRENGTH && grid_confidence < SECOND_OPINION_BELOW {
         return Verdict {
             bpm: second.bpm,
             confidence: grid_confidence.min(second.strength),
@@ -290,7 +368,7 @@ mod reconcile_tests {
 
     #[test]
     fn without_a_second_opinion_the_grid_stands_unchanged() {
-        let v = reconcile(128.0, 0.7, None);
+        let v = reconcile(128.0, 0.7, None, true);
         assert_eq!(v.bpm, 128.0);
         assert_eq!(v.confidence, 0.7);
         assert_eq!(v.method, TempoMethod::BeatGrid);
@@ -300,7 +378,7 @@ mod reconcile_tests {
     fn agreement_keeps_the_precise_figure_and_raises_confidence() {
         // The autocorrelation is the imprecise one, so its number is never the
         // one reported when the two agree.
-        let v = reconcile(128.0, 0.7, second(127.5, 0.6));
+        let v = reconcile(128.0, 0.7, second(127.5, 0.6), true);
         assert_eq!(v.bpm, 128.0);
         assert!(v.confidence >= SECOND_OPINION_BELOW);
         assert_eq!(v.method, TempoMethod::Confirmed);
@@ -311,21 +389,71 @@ mod reconcile_tests {
         // The exact case this exists for: the tracker locked onto every other
         // beat of a 170 BPM break. 85 * 2 = 170, and 170.0 is more precise than
         // the autocorrelation's 168.
-        let v = reconcile(85.0, 0.7, second(168.0, 0.6));
+        let v = reconcile(85.0, 0.7, second(168.0, 0.6), true);
         assert!((v.bpm - 170.0).abs() < 1e-9, "got {}", v.bpm);
         assert_eq!(v.method, TempoMethod::Rescaled);
     }
 
     #[test]
-    fn a_triplet_relation_is_recognised_too() {
-        let v = reconcile(120.0, 0.6, second(180.0, 0.6));
-        assert!((v.bpm - 180.0).abs() < 1e-9, "got {}", v.bpm);
-        assert_eq!(v.method, TempoMethod::Rescaled);
+    fn a_three_against_four_reading_is_disputed_not_acted_on() {
+        // Edward's "Bebe" is 120: the grid says so in every window, and the
+        // 159.9 is a percussion harmonic. Reporting 161 here was a real bug.
+        let v = reconcile(120.79, 0.97, second(159.9, 0.5), true);
+        assert_eq!(v.bpm, 120.79, "a 4:3 artefact must not overrule the grid");
+        assert_eq!(v.method, TempoMethod::Disputed);
+    }
+
+    #[test]
+    fn a_weak_second_opinion_cannot_rescale_even_on_an_octave() {
+        // Same reasoning as the override path: 0.30 strength is not evidence.
+        let v = reconcile(85.23, 0.9, second(170.4, 0.3), true);
+        assert_eq!(v.bpm, 85.23);
+        assert_eq!(v.method, TempoMethod::Disputed);
+    }
+
+    #[test]
+    fn a_triplet_relation_is_no_longer_treated_as_a_miscount() {
+        // 3:2 used to rescale the grid onto 180. It is no longer a trusted
+        // relation, so against a confident grid it is a dispute.
+        let v = reconcile(120.0, 0.95, second(180.0, 0.6), true);
+        assert_eq!(v.bpm, 120.0);
+        assert_eq!(v.method, TempoMethod::Disputed);
+
+        // Against an unsure grid the second opinion may still win, but on the
+        // strength of its own evidence rather than on the ratio.
+        let v = reconcile(120.0, 0.6, second(180.0, 0.6), true);
+        assert_eq!(v.bpm, 180.0);
+        assert_eq!(v.method, TempoMethod::SecondOpinion);
+    }
+
+    #[test]
+    fn the_ratios_cannot_collide_within_the_tolerance() {
+        // Two ratios matching the same reading would make the result depend on
+        // the order of the list rather than on the music.
+        for (i, a) in METRICAL_RATIOS.iter().enumerate() {
+            for b in &METRICAL_RATIOS[i + 1..] {
+                let apart = (a / b - 1.0).abs();
+                assert!(
+                    apart > AGREEMENT_TOLERANCE * 2.0,
+                    "ratios {a} and {b} are only {:.1}% apart",
+                    apart * 100.0
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_confident_grid_is_not_overruled_by_an_unrelated_estimate() {
+        // Edward's "Bebe": 120.36 at 0.97 across every window, against a 159.9
+        // percussion harmonic. Reporting 160 here was the bug.
+        let v = reconcile(120.36, 0.97, second(159.9, 0.6), true);
+        assert_eq!(v.bpm, 120.36);
+        assert_eq!(v.method, TempoMethod::Disputed);
     }
 
     #[test]
     fn an_unrelated_but_strong_estimate_overrules_an_unsure_grid() {
-        let v = reconcile(103.0, 0.66, second(165.0, 0.8));
+        let v = reconcile(103.0, 0.66, second(165.0, 0.8), true);
         assert_eq!(v.bpm, 165.0);
         assert_eq!(v.method, TempoMethod::SecondOpinion);
         assert!(v.confidence <= 0.66, "confidence must not rise on a guess");
@@ -333,7 +461,7 @@ mod reconcile_tests {
 
     #[test]
     fn an_unrelated_weak_estimate_leaves_the_grid_but_says_so() {
-        let v = reconcile(103.0, 0.66, second(165.0, 0.2));
+        let v = reconcile(103.0, 0.66, second(165.0, 0.2), true);
         assert_eq!(v.bpm, 103.0, "a weak guess must not overrule the measurement");
         assert_eq!(v.method, TempoMethod::Disputed);
         assert!(v.confidence <= 0.3, "a disputed tempo must read as unreliable");
@@ -342,15 +470,28 @@ mod reconcile_tests {
     #[test]
     fn confidence_never_rises_on_disagreement() {
         for (bpm, strength) in [(165.0, 0.9), (165.0, 0.1), (99.0, 0.55)] {
-            let v = reconcile(103.0, 0.5, second(bpm, strength));
+            let v = reconcile(103.0, 0.5, second(bpm, strength), true);
             assert!(v.confidence <= 0.5, "{bpm}/{strength} raised confidence");
         }
     }
 
     #[test]
+    fn material_without_a_steady_pulse_is_disputed_rather_than_rescaled() {
+        // The same reading that would be rescaled on a house record is left
+        // alone on a ballad: an octave relation between two detectors is only
+        // evidence of a miscount when the music has one obvious pulse.
+        let v = reconcile(124.68, 0.89, second(61.22, 0.8), false);
+        assert_eq!(v.bpm, 124.68);
+        assert_eq!(v.method, TempoMethod::Disputed);
+
+        let v = reconcile(124.68, 0.89, second(61.22, 0.8), true);
+        assert_eq!(v.method, TempoMethod::Rescaled);
+    }
+
+    #[test]
     fn nonsense_input_falls_back_to_the_grid() {
-        assert_eq!(reconcile(128.0, 0.5, second(0.0, 0.9)).method, TempoMethod::BeatGrid);
-        assert_eq!(reconcile(0.0, 0.5, second(128.0, 0.9)).method, TempoMethod::BeatGrid);
+        assert_eq!(reconcile(128.0, 0.5, second(0.0, 0.9), true).method, TempoMethod::BeatGrid);
+        assert_eq!(reconcile(0.0, 0.5, second(128.0, 0.9), true).method, TempoMethod::BeatGrid);
     }
 }
 
@@ -395,7 +536,7 @@ mod tests {
     #[test]
     fn detects_the_tempo_of_a_click_track() {
         let audio = click_track(120.0, 30.0);
-        let tempo = bpm::detect(&audio, SR, bpm::TempoBand::default()).expect("tempo detected");
+        let tempo = bpm::detect(&audio, SR).expect("tempo detected");
         // Octave errors are the classic failure mode, so accept half and double
         // time — the web app's own bpmDelta does the same.
         let ok = (tempo.bpm - 120.0).abs() < 3.0
@@ -407,7 +548,7 @@ mod tests {
     #[test]
     fn detects_a_different_tempo_too() {
         let audio = click_track(90.0, 30.0);
-        let tempo = bpm::detect(&audio, SR, bpm::TempoBand::default()).expect("tempo detected");
+        let tempo = bpm::detect(&audio, SR).expect("tempo detected");
         let ok = (tempo.bpm - 90.0).abs() < 4.0
             || (tempo.bpm - 45.0).abs() < 4.0
             || (tempo.bpm - 180.0).abs() < 4.0;
@@ -417,7 +558,7 @@ mod tests {
     #[test]
     fn rejects_audio_that_is_too_short_to_judge() {
         assert!(matches!(
-            bpm::detect(&[0.0; 100], SR, bpm::TempoBand::default()),
+            bpm::detect(&[0.0; 100], SR),
             Err(bpm::BpmError::TooShort { .. })
         ));
         assert!(matches!(
@@ -457,7 +598,7 @@ mod tests {
                 audio[i] = (audio[i] + s * 0.5).clamp(-1.0, 1.0);
             }
         }
-        let analysis = analyze_samples(&audio, SR, bpm::TempoBand::default()).expect("analysis succeeded");
+        let analysis = analyze_samples(&audio, SR).expect("analysis succeeded");
         assert!(analysis.bpm > 20.0 && analysis.bpm < 300.0);
         assert!(!analysis.camelot.is_empty());
 

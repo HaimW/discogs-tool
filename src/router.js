@@ -37,6 +37,7 @@ function renderCurrentView() {
             case 'setlist': renderSetlist(_filters.setlistId); break;
             case 'store': renderStore(); break;
             case 'backup': renderBackup(); break;
+            case 'analyzer': renderAnalyzer(); break;
             default: renderCollection(); break;
         }
     });

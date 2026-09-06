@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use analyzer_cli::adapter::FileAnalyzer;
 use analyzer_cli::progress::Renderer;
-use analyzer_cli::{default_ledger_for, execute, plan_only, Options};
+use analyzer_cli::{default_ledger_for, execute, plan_only, Options, resolve_yt_dlp};
 use analyzer_core::runtime::SystemClock;
 use analyzer_core::ANALYZER_VERSION;
 use analyzer_download::YtDlp;
@@ -35,8 +35,10 @@ where it left off. Tracks whose BPM or key you entered yourself are never \
 overwritten unless you pass --force."
 )]
 struct Args {
-    /// Backup JSON exported from the web app.
-    backup: PathBuf,
+    /// Backup JSON exported from the web app. Not needed with `--ui`, which
+    /// asks for it in the page.
+    #[arg(required_unless_present = "ui")]
+    backup: Option<PathBuf>,
 
     /// Where to write the analysed track_meta.
     #[arg(short, long, default_value = "analysis.json")]
@@ -75,36 +77,51 @@ struct Args {
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     timeout: u32,
 
-    /// Lowest BPM the tool will report. Tempos are folded into the one-octave
-    /// band from here to twice this, so a track detected at half or a quarter
-    /// speed is corrected. Pick it from what you play: 85 suits house and
-    /// techno, 90 keeps drum and bass at 174, 70 suits hip hop and dub. Use 0
-    /// to report tempos exactly as detected.
-    #[arg(long, value_name = "BPM", default_value_t = analyzer_analysis::bpm::DEFAULT_TEMPO_MIN)]
-    tempo_min: f64,
+    /// Open the point-and-click interface in a browser instead of running from
+    /// the terminal. Every option below is available there.
+    #[arg(long)]
+    ui: bool,
 
-    /// Which styles get their tempo cross-checked by a second detector. A
-    /// confident first reading is never cross-checked whatever this says.
-    /// "auto" checks syncopated styles only (breaks, jungle, drum and bass),
-    /// where the first detector is known to miscount. "always" checks every
-    /// style: measured on 50 house and techno tracks it confirmed 10 and got
-    /// 5 wrong, so it is not recommended. "never" uses one detector only.
-    #[arg(long, value_name = "WHEN", default_value = "auto")]
+    /// Port for `--ui`. 0 asks the operating system for a free one.
+    #[arg(long, value_name = "PORT", default_value_t = 8733)]
+    ui_port: u16,
+
+    /// Do not open a browser window when `--ui` starts.
+    #[arg(long)]
+    no_open: bool,
+
+    /// Let a web page at this origin drive the analyzer, e.g.
+    /// `--allow-origin https://haimw.github.io`. Repeatable.
+    ///
+    /// Nothing but the analyzer's own page is allowed without this. The check
+    /// matters: a browser reaches 127.0.0.1 from the same machine, so being on
+    /// loopback proves nothing about *which page* is asking, and these
+    /// endpoints read files and start processes.
+    #[arg(long, value_name = "URL")]
+    allow_origin: Vec<String>,
+
+    /// When to cross-check the tempo with a second, independent detector.
+    /// "always" (the default) checks every track and costs about 12 ms each.
+    /// "unsure" checks only where the first reading's own confidence is low,
+    /// which misses the case that matters: a detector locked onto the wrong
+    /// pulse reports an evenly spaced grid and stays confident. "never" uses
+    /// one detector, as the tool behaved before the second existed.
+    #[arg(long, value_name = "WHEN", default_value = "always")]
     second_opinion: SecondOpinionArg,
 }
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum SecondOpinionArg {
-    Auto,
     Always,
+    Unsure,
     Never,
 }
 
 impl From<SecondOpinionArg> for analyzer_core::tempo::SecondOpinion {
     fn from(value: SecondOpinionArg) -> Self {
         match value {
-            SecondOpinionArg::Auto => analyzer_core::tempo::SecondOpinion::Auto,
             SecondOpinionArg::Always => analyzer_core::tempo::SecondOpinion::Always,
+            SecondOpinionArg::Unsure => analyzer_core::tempo::SecondOpinion::Unsure,
             SecondOpinionArg::Never => analyzer_core::tempo::SecondOpinion::Never,
         }
     }
@@ -121,8 +138,15 @@ fn run() -> Result<(), String> {
     let args = Args::parse();
     let mut stdout = std::io::stdout();
 
+    if args.ui {
+        return analyzer_cli::ui::serve(args.ui_port, !args.no_open, args.allow_origin);
+    }
+
+    // Clap guarantees this is present unless `--ui` was given, which returned above.
+    let backup = args.backup.clone().expect("backup is required without --ui");
+
     if args.plan {
-        plan_only(&args.backup, args.force, &mut stdout)?;
+        plan_only(&backup, args.force, &mut stdout)?;
         return Ok(());
     }
 
@@ -136,21 +160,19 @@ fn run() -> Result<(), String> {
     eprintln!("yt-dlp {version}");
 
     let clock = SystemClock;
-    let band = analyzer_analysis::bpm::TempoBand::from_min(args.tempo_min);
     let analyzer =
-        FileAnalyzer::new(&clock, ANALYZER_VERSION, band).with_second_opinion(args.second_opinion.into());
+        FileAnalyzer::new(&clock, ANALYZER_VERSION).with_second_opinion(args.second_opinion.into());
 
     let options = Options {
         ledger: args.ledger.unwrap_or_else(|| default_ledger_for(&args.output)),
         work_dir: args
             .work_dir
             .unwrap_or_else(|| std::env::temp_dir().join("discogs-analyzer")),
-        backup: args.backup,
+        backup,
         output: args.output,
         force: args.force,
         limit: args.limit,
         max_attempts: args.max_attempts,
-        tempo_min: args.tempo_min,
         second_opinion: format!("{:?}", args.second_opinion),
     };
 
@@ -198,16 +220,6 @@ fn run() -> Result<(), String> {
             outcome.energy.unscored
         );
     }
-    if outcome.tempo_folded > 0 {
-        println!(
-            "{} tempo(s) were octave-corrected into the {:.0}-{:.0} BPM band. \
-             Each record keeps the original as bpm_folded_from; if many tracks \
-             were folded, check --tempo-min suits what you play.",
-            outcome.tempo_folded,
-            args.tempo_min,
-            args.tempo_min * 2.0
-        );
-    }
     // Protected tracks are dropped at planning time, so they never reach the
     // export at all — which is the strongest form of the guarantee: Restore
     // cannot touch a record that is not in the file.
@@ -227,38 +239,3 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-/// Prefer the binary shipped next to this one, then the repo's vendored copy,
-/// then whatever is on `$PATH`.
-fn resolve_yt_dlp(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
-    if let Some(path) = explicit {
-        if !path.exists() {
-            return Err(format!("no yt-dlp at {}", path.display()));
-        }
-        return Ok(path);
-    }
-    let mut candidates = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            candidates.push(dir.join(yt_dlp_name()));
-            // Running from `cargo run`, where the binary sits in target/debug.
-            candidates.push(dir.join("../../binaries").join(yt_dlp_name()));
-            candidates.push(dir.join("../../../binaries").join(yt_dlp_name()));
-        }
-    }
-    candidates.push(PathBuf::from("binaries").join(yt_dlp_name()));
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    // Not found locally: fall back to $PATH and let the version check report it.
-    Ok(PathBuf::from(yt_dlp_name()))
-}
-
-fn yt_dlp_name() -> &'static str {
-    if cfg!(windows) {
-        "yt-dlp.exe"
-    } else {
-        "yt-dlp"
-    }
-}

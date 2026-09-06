@@ -51,13 +51,6 @@ pub struct TrackMeta {
     pub energy_score: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bpm_confidence: Option<f64>,
-    /// The tempo before octave folding, present only when folding changed it.
-    ///
-    /// Folding is the one step that overrules the measurement rather than
-    /// refining it, so the original is kept: if `--tempo-min` is wrong for a
-    /// track, this is what shows it without re-analysing anything.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bpm_folded_from: Option<f64>,
     /// How the tempo was decided when two methods were involved — see the
     /// analysis crate's `TempoMethod`. Absent for the ordinary single-method
     /// case, present and worth reading on syncopated material.
@@ -100,7 +93,6 @@ impl TrackMeta {
             energy_source: None,
             energy_score: None,
             bpm_confidence: None,
-            bpm_folded_from: None,
             bpm_method: None,
             bpm_second_opinion: None,
             key_strength: None,
@@ -226,9 +218,6 @@ pub struct AnalysisResult {
     /// including the ones analysed hours earlier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_score: Option<f64>,
-    /// The tempo the beat grid actually gave, when octave folding overruled it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub bpm_folded_from: Option<f64>,
     /// How the tempo was arrived at, when more than one method was involved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bpm_method: Option<String>,
@@ -257,7 +246,6 @@ pub fn merge(existing: &TrackMeta, result: &AnalysisResult, force: bool) -> Opti
     if force || !protection.bpm.is_protected() {
         merged.bpm = Some(result.bpm);
         merged.bpm_confidence = Some(result.bpm_confidence);
-        merged.bpm_folded_from = result.bpm_folded_from;
         merged.bpm_method = result.bpm_method.clone();
         merged.bpm_second_opinion = result.bpm_second_opinion;
         merged.bpm_source = Some(SOURCE_ANALYSIS.to_string());
@@ -390,7 +378,6 @@ mod tests {
             key_strength: 0.7,
             energy: Some(6),
             energy_score: Some(0.55),
-            bpm_folded_from: None,
             bpm_method: None,
             bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),

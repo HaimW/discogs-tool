@@ -1,31 +1,110 @@
-//! Locates aubio and libkeyfinder, generates aubio's bindings, and compiles the
-//! C++ shim that fronts libkeyfinder.
+//! Compiles the native pieces the analyzer links, and generates aubio's
+//! bindings.
 //!
-//! aubio's `smpl_t` is `float` or `double` depending on how the library was
-//! compiled, so the bindings are generated from the installed headers rather
-//! than hand-written against a guess.
+//! Everything here exists to make the resulting binary self-contained. The
+//! distribution-packaged aubio drags in ffmpeg, libsndfile, libsamplerate,
+//! mpg123 and four codec libraries — none of which are used, because audio is
+//! decoded in-process by symphonia — and every one of them becomes a runtime
+//! dependency. A binary built that way runs on the machine that built it and
+//! nowhere else, which is fatal for a tool whose whole point is being handed to
+//! a friend.
 //!
-//! libkeyfinder usually lives in a user prefix (it has no Ubuntu package and we
-//! install it without sudo), so `~/.local` is searched when pkg-config comes up
-//! empty. Override with `LIBKEYFINDER_PREFIX`.
+//! So aubio is compiled here from vendored sources with none of those backends,
+//! using its own ooura FFT, and libkeyfinder and FFTW are linked as static
+//! archives built by `scripts/build-native.sh`.
+//!
+//! Set `NATIVE_PREFIX` to point at those archives if they are not in
+//! `desktop-analyzer/native`.
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=shim/keyfinder_shim.cpp");
-    println!("cargo:rerun-if-env-changed=LIBKEYFINDER_PREFIX");
-    println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
+    println!("cargo:rerun-if-changed=../../vendor/aubio");
+    println!("cargo:rerun-if-env-changed=NATIVE_PREFIX");
 
-    let aubio = pkg_config::Config::new()
-        .probe("aubio")
-        .expect("aubio not found. Install libaubio-dev (Debian/Ubuntu) or aubio (brew).");
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("set by cargo"));
+    let workspace = manifest
+        .ancestors()
+        .nth(2)
+        .expect("crates/analysis sits two levels below the workspace root")
+        .to_path_buf();
+    let aubio_src = workspace.join("vendor/aubio");
+    let prefix = env::var("NATIVE_PREFIX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| workspace.join("native"));
 
-    let keyfinder = find_keyfinder();
+    // Both, so a half-finished build-native.sh fails here with an explanation
+    // rather than later as `cannot find -lfftw3`.
+    for archive in ["lib/libkeyfinder.a", "lib/libfftw3.a"] {
+        if !prefix.join(archive).exists() {
+            panic!(
+                "{} not found under {}.\n\
+                 Run desktop-analyzer/scripts/build-native.sh first, or set NATIVE_PREFIX.",
+                archive,
+                prefix.display()
+            );
+        }
+    }
 
-    // --- aubio bindings ---
-    let mut builder = bindgen::Builder::default()
-        .header_contents("aubio_wrapper.h", "#include <aubio/aubio.h>\n")
+    build_aubio(&aubio_src);
+    generate_aubio_bindings(&aubio_src);
+    build_keyfinder_shim(&prefix);
+
+    // Static archives, so nothing has to be installed on the machine that runs
+    // the binary. Order matters to the linker: keyfinder before the FFTW it
+    // calls into.
+    println!("cargo:rustc-link-search=native={}", prefix.join("lib").display());
+    println!("cargo:rustc-link-lib=static=keyfinder");
+    println!("cargo:rustc-link-lib=static=fftw3");
+    // libkeyfinder is C++, so its standard library has to come along. This is
+    // the one system library we still take dynamically: it is present wherever
+    // there is a C++ program, which is everywhere.
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-lib=c++");
+    } else {
+        println!("cargo:rustc-link-lib=stdc++");
+    }
+}
+
+/// Compile aubio's tempo path into a static archive of our own.
+fn build_aubio(src: &Path) {
+    let mut build = cc::Build::new();
+    build
+        .include(src)
+        .include(src.join(".."))
+        // aubio's sources include "aubio_priv.h", which wants a config header.
+        // Ours declares only what the tempo path touches: no codecs, no I/O.
+        .define("HAVE_STDLIB_H", "1")
+        .define("HAVE_STDIO_H", "1")
+        .define("HAVE_MATH_H", "1")
+        .define("HAVE_STRING_H", "1")
+        .define("HAVE_LIMITS_H", "1")
+        .define("HAVE_STDARG_H", "1")
+        .warnings(false);
+
+    let mut count = 0;
+    for dir in [".", "tempo", "onset", "spectral", "temporal", "utils"] {
+        let dir = src.join(dir);
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "c") {
+                build.file(&path);
+                count += 1;
+            }
+        }
+    }
+    assert!(count > 20, "expected aubio's tempo sources, found {count} files");
+    build.compile("aubio_vendored");
+}
+
+fn generate_aubio_bindings(src: &Path) {
+    let builder = bindgen::Builder::default()
+        .header_contents("aubio_wrapper.h", "#include <aubio.h>\n")
+        .clang_arg(format!("-I{}", src.display()))
         // Only the tempo surface we actually call, plus the vector type it
         // takes. Binding all of aubio would be a large, brittle blob.
         .allowlist_function("new_aubio_tempo")
@@ -43,9 +122,6 @@ fn main() {
         .allowlist_type("uint_t")
         .layout_tests(false)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
-    for path in &aubio.include_paths {
-        builder = builder.clang_arg(format!("-I{}", path.display()));
-    }
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR set by cargo"));
     builder
@@ -53,63 +129,13 @@ fn main() {
         .expect("failed to generate aubio bindings")
         .write_to_file(out.join("aubio_bindings.rs"))
         .expect("failed to write aubio bindings");
-
-    // --- libkeyfinder shim ---
-    let mut build = cc::Build::new();
-    build.cpp(true).std("c++11").file("shim/keyfinder_shim.cpp");
-    for inc in &keyfinder.include_paths {
-        build.include(inc);
-    }
-    build.compile("keyfinder_shim");
-
-    for dir in &keyfinder.link_paths {
-        println!("cargo:rustc-link-search=native={}", dir.display());
-        // Published to dependent crates as DEP_KEYFINDER_RPATH so their
-        // binaries can bake in the same rpath — see `links` in Cargo.toml.
-        println!("cargo:rpath={}", dir.display());
-        // Baked into the binary so it finds a library in a user prefix at run
-        // time without the user having to set LD_LIBRARY_PATH.
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{}", dir.display());
-    }
-    for lib in &keyfinder.libs {
-        println!("cargo:rustc-link-lib=dylib={lib}");
-    }
 }
 
-struct Keyfinder {
-    include_paths: Vec<PathBuf>,
-    link_paths: Vec<PathBuf>,
-    libs: Vec<String>,
-}
-
-fn find_keyfinder() -> Keyfinder {
-    if let Ok(lib) = pkg_config::Config::new().probe("libkeyfinder") {
-        return Keyfinder {
-            include_paths: lib.include_paths,
-            link_paths: lib.link_paths,
-            libs: lib.libs,
-        };
-    }
-
-    let prefix = env::var("LIBKEYFINDER_PREFIX")
-        .map(PathBuf::from)
-        .or_else(|_| env::var("HOME").map(|h| PathBuf::from(h).join(".local")))
-        .expect("set LIBKEYFINDER_PREFIX to where libkeyfinder is installed");
-
-    let include = prefix.join("include");
-    let lib = prefix.join("lib");
-    assert!(
-        include.join("keyfinder").join("keyfinder.h").exists(),
-        "libkeyfinder headers not found under {}. Build it with:\n  \
-         git clone https://github.com/mixxxdj/libkeyfinder && cd libkeyfinder && \
-         cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local -DBUILD_TESTING=OFF -S . -B build && \
-         cmake --build build && cmake --install build",
-        include.display()
-    );
-
-    Keyfinder {
-        include_paths: vec![include],
-        link_paths: vec![lib],
-        libs: vec!["keyfinder".to_string()],
-    }
+fn build_keyfinder_shim(prefix: &Path) {
+    cc::Build::new()
+        .cpp(true)
+        .std("c++11")
+        .file("shim/keyfinder_shim.cpp")
+        .include(prefix.join("include"))
+        .compile("keyfinder_shim");
 }
