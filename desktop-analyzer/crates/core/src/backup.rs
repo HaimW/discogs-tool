@@ -71,6 +71,10 @@ pub struct Release {
     pub title: Option<String>,
     #[serde(default)]
     pub artist: Option<String>,
+    /// Discogs' comma-separated styles, e.g. "Deep House, Tech House". Used to
+    /// pick a tempo band per release — see [`crate::tempo`].
+    #[serde(default)]
+    pub styles: Option<String>,
 }
 
 #[derive(Debug)]

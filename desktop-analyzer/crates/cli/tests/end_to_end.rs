@@ -60,7 +60,7 @@ struct RecordingAnalyzer {
 }
 
 impl Analyzer for RecordingAnalyzer {
-    fn analyze(&self, path: &Path) -> Result<AnalysisResult, StepError> {
+    fn analyze(&self, path: &Path, _hint: analyzer_core::tempo::TempoHint) -> Result<AnalysisResult, StepError> {
         let id = path.file_stem().unwrap().to_string_lossy().to_string();
         self.seen.borrow_mut().push(id);
         Ok(AnalysisResult {
@@ -70,6 +70,10 @@ impl Analyzer for RecordingAnalyzer {
             key_musical: "A minor".into(),
             key_strength: 0.8,
             energy: Some(7),
+            energy_score: None,
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
             analyzer_version: "test".into(),
         })
@@ -122,6 +126,8 @@ impl Fixture {
                 force,
                 limit: None,
                 max_attempts: 3,
+                tempo_min: analyzer_analysis::bpm::DEFAULT_TEMPO_MIN,
+                second_opinion: "Auto".into(),
             },
             dir,
         }

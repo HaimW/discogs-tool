@@ -74,6 +74,40 @@ struct Args {
     /// Seconds before a stalled download is abandoned.
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     timeout: u32,
+
+    /// Lowest BPM the tool will report. Tempos are folded into the one-octave
+    /// band from here to twice this, so a track detected at half or a quarter
+    /// speed is corrected. Pick it from what you play: 85 suits house and
+    /// techno, 90 keeps drum and bass at 174, 70 suits hip hop and dub. Use 0
+    /// to report tempos exactly as detected.
+    #[arg(long, value_name = "BPM", default_value_t = analyzer_analysis::bpm::DEFAULT_TEMPO_MIN)]
+    tempo_min: f64,
+
+    /// Which styles get their tempo cross-checked by a second detector. A
+    /// confident first reading is never cross-checked whatever this says.
+    /// "auto" checks syncopated styles only (breaks, jungle, drum and bass),
+    /// where the first detector is known to miscount. "always" checks every
+    /// style: measured on 50 house and techno tracks it confirmed 10 and got
+    /// 5 wrong, so it is not recommended. "never" uses one detector only.
+    #[arg(long, value_name = "WHEN", default_value = "auto")]
+    second_opinion: SecondOpinionArg,
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+enum SecondOpinionArg {
+    Auto,
+    Always,
+    Never,
+}
+
+impl From<SecondOpinionArg> for analyzer_core::tempo::SecondOpinion {
+    fn from(value: SecondOpinionArg) -> Self {
+        match value {
+            SecondOpinionArg::Auto => analyzer_core::tempo::SecondOpinion::Auto,
+            SecondOpinionArg::Always => analyzer_core::tempo::SecondOpinion::Always,
+            SecondOpinionArg::Never => analyzer_core::tempo::SecondOpinion::Never,
+        }
+    }
 }
 
 fn main() {
@@ -102,7 +136,9 @@ fn run() -> Result<(), String> {
     eprintln!("yt-dlp {version}");
 
     let clock = SystemClock;
-    let analyzer = FileAnalyzer::new(&clock, ANALYZER_VERSION);
+    let band = analyzer_analysis::bpm::TempoBand::from_min(args.tempo_min);
+    let analyzer =
+        FileAnalyzer::new(&clock, ANALYZER_VERSION, band).with_second_opinion(args.second_opinion.into());
 
     let options = Options {
         ledger: args.ledger.unwrap_or_else(|| default_ledger_for(&args.output)),
@@ -114,6 +150,8 @@ fn run() -> Result<(), String> {
         force: args.force,
         limit: args.limit,
         max_attempts: args.max_attempts,
+        tempo_min: args.tempo_min,
+        second_opinion: format!("{:?}", args.second_opinion),
     };
 
     // Ctrl-C sets a flag instead of killing the process, so the current track
@@ -145,6 +183,31 @@ fn run() -> Result<(), String> {
     )?;
 
     println!("Wrote {} record(s) to {}", outcome.written, options.output.display());
+    if outcome.energy.rescaled > 0 {
+        println!(
+            "Energy re-scaled to deciles of your collection ({} record(s)); \
+             a track's level can shift as more of the collection is analysed.",
+            outcome.energy.rescaled
+        );
+    }
+    if outcome.energy.unscored > 0 {
+        println!(
+            "{} record(s) kept an energy this run could not rank, so those \
+             values are on the old absolute scale and are not comparable with \
+             the rest. Re-analyse them with --force to bring them into line.",
+            outcome.energy.unscored
+        );
+    }
+    if outcome.tempo_folded > 0 {
+        println!(
+            "{} tempo(s) were octave-corrected into the {:.0}-{:.0} BPM band. \
+             Each record keeps the original as bpm_folded_from; if many tracks \
+             were folded, check --tempo-min suits what you play.",
+            outcome.tempo_folded,
+            args.tempo_min,
+            args.tempo_min * 2.0
+        );
+    }
     // Protected tracks are dropped at planning time, so they never reach the
     // export at all — which is the strongest form of the guarantee: Restore
     // cannot touch a record that is not in the file.

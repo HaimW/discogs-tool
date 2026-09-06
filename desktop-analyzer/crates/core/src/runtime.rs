@@ -239,6 +239,10 @@ mod tests {
             key_musical: "A minor".into(),
             key_strength: 0.7,
             energy: Some(6),
+            energy_score: None,
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
             analyzer_version: "0.1.0".into(),
         }

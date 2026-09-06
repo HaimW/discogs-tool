@@ -25,6 +25,7 @@ pub mod meta;
 pub mod pipeline;
 pub mod plan;
 pub mod runtime;
+pub mod tempo;
 
 use meta::{merge, AnalysisResult, TrackMeta};
 
@@ -120,6 +121,10 @@ mod tests {
             key_musical: "A minor".into(),
             key_strength: 0.71,
             energy: Some(6),
+            energy_score: None,
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
             analyzer_version: ANALYZER_VERSION.into(),
         }
