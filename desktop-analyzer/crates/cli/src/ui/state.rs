@@ -120,6 +120,10 @@ impl UiState {
         };
         let yt_dlp = body["yt_dlp"].as_str().filter(|s| !s.is_empty()).map(user_path);
         let timeout = body["timeout"].as_u64().unwrap_or(30) as u32;
+        let cookies = body["cookies_from_browser"]
+            .as_str()
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string);
 
         {
             let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -128,7 +132,7 @@ impl UiState {
         self.stop.store(false, Ordering::Relaxed);
 
         let state = Arc::clone(self);
-        std::thread::spawn(move || run(state, options, yt_dlp, timeout));
+        std::thread::spawn(move || run(state, options, yt_dlp, timeout, cookies));
         serde_json::json!({ "ok": true })
     }
 
@@ -188,7 +192,13 @@ fn second_opinion_of(options: &Options) -> SecondOpinion {
     }
 }
 
-fn run(state: Arc<UiState>, options: Options, yt_dlp: Option<PathBuf>, timeout: u32) {
+fn run(
+    state: Arc<UiState>,
+    options: Options,
+    yt_dlp: Option<PathBuf>,
+    timeout: u32,
+    cookies_from_browser: Option<String>,
+) {
     let resolved = match resolve_yt_dlp(yt_dlp) {
         Ok(p) => p,
         Err(e) => {
@@ -196,7 +206,9 @@ fn run(state: Arc<UiState>, options: Options, yt_dlp: Option<PathBuf>, timeout: 
             return;
         }
     };
-    let downloader = YtDlp::new(&resolved).with_timeout(timeout);
+    let downloader = YtDlp::new(&resolved)
+        .with_timeout(timeout)
+        .with_cookies_from_browser(cookies_from_browser);
     match downloader.version() {
         Ok(v) => state.log(format!("yt-dlp {v}")),
         Err(e) => {
@@ -280,6 +292,14 @@ fn report(state: &Arc<UiState>, event: Progress) {
         }
         Progress::LedgerUnsaved { message } => {
             inner.log.push(format!("Progress could not be saved: {message}"));
+        }
+        Progress::Blocked { failures } => {
+            inner.log.push(format!(
+                "YouTube refused {failures} downloads in a row, asking each to prove it is not \
+                 automated. Stopping — none of those tracks were charged an attempt. Wait a \
+                 while, then try again with fewer downloads at once, or set a browser to take \
+                 cookies from."
+            ));
         }
         Progress::LedgerSaved => inner.log.push("Progress saving recovered.".into()),
         Progress::Finished(summary) => {

@@ -9,7 +9,7 @@
 //! on track 400 of 900 must not lose 399 downloads.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Mutex};
 
 use crate::ledger::{EntryState, Ledger};
@@ -50,15 +50,31 @@ pub struct StepError {
     /// budget. Permanent ones (deleted video, region block) are not — retrying
     /// them just burns time on every future run.
     pub retryable: bool,
+    /// The failure was about the *run*, not this track: YouTube demanding a
+    /// sign-in because too much was asked of it at once, and which every other
+    /// track in the queue is about to hit too.
+    ///
+    /// These do not consume the track's retry budget. A track has three
+    /// attempts so that a genuinely broken video is eventually written off;
+    /// spending them on a block that says nothing about the video would write
+    /// off the whole collection in the couple of minutes it takes to fail three
+    /// thousand downloads. Learned the hard way: a 16-wide run tripped the bot
+    /// check and produced 310 of these in one burst.
+    pub blocked: bool,
 }
 
 impl StepError {
     pub fn retryable(message: impl Into<String>) -> StepError {
-        StepError { message: message.into(), retryable: true }
+        StepError { message: message.into(), retryable: true, blocked: false }
+    }
+
+    /// A refusal aimed at the run rather than the track. Retryable, and free.
+    pub fn blocked(message: impl Into<String>) -> StepError {
+        StepError { message: message.into(), retryable: true, blocked: true }
     }
 
     pub fn permanent(message: impl Into<String>) -> StepError {
-        StepError { message: message.into(), retryable: false }
+        StepError { message: message.into(), retryable: false, blocked: false }
     }
 }
 
@@ -86,6 +102,10 @@ pub enum Progress {
     LedgerUnsaved { message: String },
     /// Saving recovered after a [`Progress::LedgerUnsaved`].
     LedgerSaved,
+    /// The download host is refusing the run — asking every request to prove it
+    /// is not automated. The run stops rather than converting the rest of the
+    /// queue into failures, and no track is charged for it.
+    Blocked { failures: usize },
     Finished(Summary),
 }
 
@@ -190,6 +210,10 @@ pub fn record_plan_decisions(ledger: &mut Ledger, plan: &Plan, clock: &dyn Clock
 ///
 /// Returns a summary; per-item results live in the ledger, which is saved after
 /// every item so an interrupted run resumes cleanly.
+/// How many refusals in a row before a run gives up. Small, because they arrive
+/// in bursts: once the host has decided, the next request is refused too.
+const BLOCKED_BEFORE_GIVING_UP: usize = 8;
+
 /// What a worker finished doing. Workers never touch the ledger or report
 /// progress themselves — they send one of these and the owning thread does
 /// both, which is what keeps a concurrent run as safe as a serial one.
@@ -236,6 +260,12 @@ pub fn run(
         needs_review: counts.review,
     };
 
+    // Consecutive refusals aimed at the run. Once the host starts asking every
+    // request to prove it is not a robot, carrying on just converts the rest of
+    // the queue into failures at several a second.
+    let mut blocked_in_a_row = 0usize;
+    let stop_because_blocked = AtomicBool::new(false);
+
     // Downloading and analysing overlap, and each runs several at a time. The
     // ledger and the export are touched by exactly one thread — this one — so
     // there is no shared mutable state to get wrong: workers only send `Done`.
@@ -253,9 +283,10 @@ pub fn run(
             let done_tx = done_tx.clone();
             let next = &next;
             let work = &work;
+            let blocked = &stop_because_blocked;
             scope.spawn(move || {
                 loop {
-                    if should_stop() {
+                    if should_stop() || blocked.load(Ordering::SeqCst) {
                         break;
                     }
                     let index = next.fetch_add(1, Ordering::SeqCst);
@@ -338,17 +369,28 @@ pub fn run(
                     finished += 1;
                     let message = error.message.clone();
                     let retryable = error.retryable;
-                    record_failure(
-                        ledger, &item, &error, clock, store, options.max_attempts,
-                        &mut save_failing, on_progress,
-                    );
+                    if error.blocked {
+                        // Nothing is recorded: the track was never really tried.
+                        blocked_in_a_row += 1;
+                        if blocked_in_a_row >= BLOCKED_BEFORE_GIVING_UP {
+                            on_progress(Progress::Blocked { failures: blocked_in_a_row });
+                            stop_because_blocked.store(true, Ordering::SeqCst);
+                        }
+                    } else {
+                        blocked_in_a_row = 0;
+                        record_failure(
+                            ledger, &item, &error, clock, store, options.max_attempts,
+                            &mut save_failing, on_progress,
+                        );
+                    }
                     on_progress(Progress::Failed {
                         index: finished,
                         total,
                         item_id: item.id.clone(),
                         error: message,
                         will_retry: retryable
-                            && ledger.attempts(&item.id) < options.max_attempts,
+                            && (error.blocked
+                                || ledger.attempts(&item.id) < options.max_attempts),
                     });
                     summary.failed += 1;
                 }

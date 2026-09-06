@@ -57,6 +57,14 @@ impl<W: Write> Renderer<W> {
                      Results from here on will be lost if this run is interrupted."
                 ));
             }
+            Progress::Blocked { failures } => {
+                self.line(&format!(
+                    "YouTube refused {failures} downloads in a row, asking each to prove it is \
+                     not automated. Stopping — nothing has been charged against those tracks. \
+                     Wait a while and re-run with fewer downloads at once, or pass \
+                     --cookies-from-browser to sign the requests in."
+                ));
+            }
             Progress::LedgerSaved => {
                 self.line("Progress saving again — the run is resumable once more.");
             }

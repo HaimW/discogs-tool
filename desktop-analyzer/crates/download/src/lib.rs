@@ -41,15 +41,30 @@ pub struct YtDlp {
     binary: PathBuf,
     /// Passed to yt-dlp as `--socket-timeout`.
     timeout_seconds: u32,
+    /// Browser to take YouTube cookies from, if any.
+    ///
+    /// Anonymous requests are what get refused: past a certain rate YouTube
+    /// starts asking each one to prove it is not automated. A signed-in session
+    /// is tolerated far better. The cost is that downloads are then attributable
+    /// to that account, which is a decision for whoever is running it — hence a
+    /// setting rather than a default.
+    cookies_from_browser: Option<String>,
 }
 
 impl YtDlp {
     pub fn new(binary: impl Into<PathBuf>) -> YtDlp {
-        YtDlp { binary: binary.into(), timeout_seconds: 30 }
+        YtDlp { binary: binary.into(), timeout_seconds: 30, cookies_from_browser: None }
     }
 
     pub fn with_timeout(mut self, seconds: u32) -> YtDlp {
         self.timeout_seconds = seconds;
+        self
+    }
+
+    /// Sign requests with cookies from this browser: "firefox", "chrome",
+    /// "edge", "brave", and the rest of yt-dlp's list.
+    pub fn with_cookies_from_browser(mut self, browser: Option<String>) -> YtDlp {
+        self.cookies_from_browser = browser.filter(|b| !b.trim().is_empty());
         self
     }
 
@@ -75,7 +90,8 @@ impl Downloader for YtDlp {
     fn download(&self, item: &PlannedItem, dest_dir: &Path) -> Result<PathBuf, StepError> {
         let template = dest_dir.join(format!("{}.%(ext)s", sanitize(&item.id)));
 
-        let output = Command::new(&self.binary)
+        let mut command = Command::new(&self.binary);
+        command
             .arg("--no-playlist")
             .arg("--no-warnings")
             .arg("--no-progress")
@@ -84,14 +100,19 @@ impl Downloader for YtDlp {
             .arg("-f")
             .arg(AUDIO_FORMAT)
             .arg("--socket-timeout")
-            .arg(self.timeout_seconds.to_string())
+            .arg(self.timeout_seconds.to_string());
+        if let Some(browser) = &self.cookies_from_browser {
+            command.arg("--cookies-from-browser").arg(browser);
+        }
+        command
             .arg("-o")
             .arg(&template)
             // Ask yt-dlp for the path it actually wrote, rather than guessing
             // the extension.
             .arg("--print")
             .arg("after_move:filepath")
-            .arg(item.youtube_url())
+            .arg(item.youtube_url());
+        let output = command
             .output()
             .map_err(|e| {
                 StepError::permanent(format!("could not run {}: {e}", self.binary.display()))
@@ -148,8 +169,24 @@ pub fn classify(stderr: &str) -> StepError {
         return StepError::permanent(message);
     }
 
-    // Everything else — timeouts, 5xx, rate limiting, transient DNS — gets
-    // another attempt within the budget.
+    // A refusal aimed at the whole run rather than this video. YouTube starts
+    // asking for a sign-in when it decides the traffic looks automated, and
+    // every queued track is about to be told the same thing. Charging these to
+    // the track's retry budget would write off the entire collection in the
+    // time it takes to fail three thousand downloads.
+    const BLOCKED: [&str; 5] = [
+        "sign in to confirm you're not a bot",
+        "sign in to confirm you’re not a bot",
+        "confirm you're not a bot",
+        "http error 429",
+        "too many requests",
+    ];
+    if BLOCKED.iter().any(|p| lower.contains(p)) {
+        return StepError::blocked(message);
+    }
+
+    // Everything else — timeouts, 5xx, transient DNS — gets another attempt
+    // within the budget.
     StepError::retryable(message)
 }
 
@@ -198,11 +235,35 @@ mod tests {
     }
 
     #[test]
+    fn a_bot_check_is_about_the_run_not_the_track() {
+        // The exact wording from a real 16-wide run that tripped YouTube's
+        // check, including the curly apostrophe it actually sends.
+        let cases = [
+            "ERROR: [youtube] Y57q3GU8fNg: Sign in to confirm you\u{2019}re not a bot. Use --cookies-from-browser",
+            "ERROR: [youtube] abc: Sign in to confirm you're not a bot",
+            "ERROR: [youtube] abc: HTTP Error 429: Too Many Requests",
+        ];
+        for stderr in cases {
+            let e = classify(stderr);
+            assert!(e.retryable, "should be retried: {stderr}");
+            assert!(e.blocked, "should not cost the track an attempt: {stderr}");
+        }
+    }
+
+    #[test]
+    fn an_age_gate_is_still_about_the_track() {
+        // Both mention signing in; only one is about the video itself.
+        let e = classify("ERROR: [youtube] abc: Sign in to confirm your age");
+        assert!(!e.retryable);
+        assert!(!e.blocked);
+    }
+
+    #[test]
     fn network_trouble_is_retryable() {
         for stderr in [
             "ERROR: unable to download video data: <urlopen error timed out>",
             "ERROR: [youtube] abc: HTTP Error 503: Service Unavailable",
-            "ERROR: [youtube] abc: HTTP Error 429: Too Many Requests",
+
             "ERROR: Unable to download webpage: <urlopen error [Errno -3] Temporary failure in name resolution>",
         ] {
             let e = classify(stderr);
