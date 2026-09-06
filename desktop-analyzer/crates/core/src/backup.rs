@@ -75,6 +75,11 @@ pub struct Release {
     /// pick a tempo band per release — see [`crate::tempo`].
     #[serde(default)]
     pub styles: Option<String>,
+    /// Discogs' comma-separated genres, e.g. "Electronic" or "Rock, Pop". The
+    /// coarser field, and the one that says whether a release is dance music at
+    /// all.
+    #[serde(default)]
+    pub genres: Option<String>,
 }
 
 #[derive(Debug)]

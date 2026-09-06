@@ -13,7 +13,7 @@ fn main() {
     let path = std::path::PathBuf::from(path);
 
     let started = std::time::Instant::now();
-    match analyzer_analysis::analyze_file(&path, analyzer_analysis::bpm::TempoBand::default()) {
+    match analyzer_analysis::analyze_file(&path) {
         Ok(a) => {
             println!("file      : {}", path.display());
             println!("duration  : {:.1}s", a.duration_seconds);

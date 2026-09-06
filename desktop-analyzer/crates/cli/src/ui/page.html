@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vinyl Analyzer</title>
+<style>
+  :root {
+    --bg: #0d0d0f; --card: #141418; --line: #26262e; --text: #e8e8ea;
+    --muted: #9a9aa4; --dim: #6a6a74; --accent: #d8a32b; --bad: #d8503b;
+    --mono: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 28px 20px 60px;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-family: var(--mono); font-size: 22px; letter-spacing: -0.4px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 6px 0 22px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 18px; margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 1.3px;
+    color: var(--dim); margin-bottom: 14px; font-weight: 600;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; }
+  input[type=text], input[type=number], select {
+    width: 100%; background: #0a0a0c; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+    font: 13px var(--mono);
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .field { margin-bottom: 12px; }
+  .hint { font-size: 11px; color: var(--dim); margin-top: 4px; }
+  .check { display: flex; align-items: flex-start; gap: 9px; margin: 10px 0; }
+  .check input { margin-top: 3px; flex-shrink: 0; }
+  .check span { font-size: 13px; color: var(--text); }
+  .check .hint { margin: 2px 0 0; }
+  button {
+    background: var(--accent); color: #17170e; border: none; border-radius: 6px;
+    padding: 10px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+  button.stop { background: var(--bad); color: #fff; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  details summary {
+    cursor: pointer; font-size: 12px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1.1px; margin-bottom: 12px;
+  }
+  .bar { height: 6px; background: #0a0a0c; border-radius: 3px; overflow: hidden; margin: 12px 0 8px; }
+  .bar > div { height: 100%; background: var(--accent); width: 0; transition: width 0.3s; }
+  .stats { display: flex; gap: 20px; font: 12px var(--mono); color: var(--muted); flex-wrap: wrap; }
+  .stats b { color: var(--text); font-weight: 400; }
+  #log {
+    background: #08080a; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; margin-top: 12px; height: 260px; overflow-y: auto;
+    font: 11px/1.6 var(--mono); color: var(--muted); white-space: pre-wrap;
+  }
+  #log .fail { color: var(--bad); }
+  .banner { border-radius: 6px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+  .banner.ok { background: rgba(216,163,43,0.10); border: 1px solid var(--accent); }
+  .banner.err { background: rgba(216,80,59,0.10); border: 1px solid var(--bad); }
+  .planline { font: 12px var(--mono); color: var(--muted); margin-top: 10px; }
+  .planline b { color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Vinyl Analyzer</h1>
+  <p class="sub">
+    Reads a backup from the web app, works out the BPM, key and energy of every
+    linked track, and writes a file you import with <em>Restore from backup</em>.
+  </p>
+
+  <div class="card">
+    <h2>Files</h2>
+    <div class="field">
+      <label for="backup">Backup file</label>
+      <input type="text" id="backup" placeholder="/path/to/vinyl-backup-2026-09-06.json">
+      <p class="hint">The JSON you downloaded from Backup &amp; Restore. Export a fresh one — records are written whole, so an old export can undo newer edits.</p>
+    </div>
+    <div class="field">
+      <label for="output">Write the result to</label>
+      <input type="text" id="output" value="analysis.json">
+    </div>
+    <div class="actions">
+      <button class="ghost" id="planBtn">Dry run</button>
+      <span class="planline" id="planline"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What to analyse</h2>
+    <div class="row">
+      <div class="field">
+        <label for="limit">Stop after this many tracks</label>
+        <input type="number" id="limit" min="0" placeholder="all of them">
+        <p class="hint">Blank runs the whole collection. The rest stay queued.</p>
+      </div>
+      <div class="field">
+        <label for="second">Cross-check the tempo</label>
+        <select id="second">
+          <option value="always" selected>Always — every track (recommended)</option>
+          <option value="unsure">Only when the first reading is unsure</option>
+          <option value="never">Never — one detector</option>
+        </select>
+        <p class="hint">A second detector that fails differently. Costs about 11&nbsp;ms a track.</p>
+      </div>
+    </div>
+    <div class="check">
+      <input type="checkbox" id="force">
+      <span>Re-analyse tracks I set or verified myself
+        <p class="hint">Off by default. This overwrites your own BPM and key.</p>
+      </span>
+    </div>
+  </div>
+
+  <div class="card">
+    <details>
+      <summary>Advanced</summary>
+      <div class="row">
+        <div class="field">
+          <label for="ledger">Resume file</label>
+          <input type="text" id="ledger" placeholder="beside the output">
+        </div>
+        <div class="field">
+          <label for="workdir">Scratch space for audio</label>
+          <input type="text" id="workdir" placeholder="system temp directory">
+        </div>
+        <div class="field">
+          <label for="ytdlp">yt-dlp</label>
+          <input type="text" id="ytdlp" placeholder="found automatically">
+        </div>
+        <div class="field">
+          <label for="attempts">Retries per track</label>
+          <input type="number" id="attempts" value="3" min="1" max="10">
+        </div>
+        <div class="field">
+          <label for="timeout">Download timeout (seconds)</label>
+          <input type="number" id="timeout" value="30" min="5" max="600">
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Run</h2>
+    <div class="banner ok" id="result" hidden></div>
+    <div class="actions">
+      <button id="runBtn">Start</button>
+      <button class="stop" id="stopBtn" hidden>Stop</button>
+    </div>
+    <div class="bar"><div id="bar"></div></div>
+    <div class="stats">
+      <span id="activity">Idle</span>
+      <span><b id="done">0</b> / <b id="total">0</b></span>
+      <span>analysed <b id="analyzed">0</b></span>
+      <span>failed <b id="failed">0</b></span>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card" id="oracleCard" hidden>
+    <h2>Oracle</h2>
+    <p class="sub" style="margin:0 0 12px">
+      A second, independent beat tracker found on this machine. It does not ship
+      with the analyzer and is not used by it — it exists to tell you where the
+      two disagree, which is where a number is worth checking by ear.
+    </p>
+    <div class="row">
+      <div class="field">
+        <label for="oracleCount">Tracks to cross-check</label>
+        <input type="number" id="oracleCount" value="200" min="1" max="2000">
+        <p class="hint" id="oracleCached"></p>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="ghost" id="oracleBtn">Cross-check against the oracle</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+var $ = function (id) { return document.getElementById(id); };
+
+function options() {
+  var limit = parseInt($('limit').value, 10);
+  return {
+    backup: $('backup').value.trim(),
+    output: $('output').value.trim() || 'analysis.json',
+    ledger: $('ledger').value.trim(),
+    work_dir: $('workdir').value.trim(),
+    yt_dlp: $('ytdlp').value.trim(),
+    force: $('force').checked,
+    limit: isFinite(limit) && limit > 0 ? limit : null,
+    max_attempts: parseInt($('attempts').value, 10) || 3,
+    timeout: parseInt($('timeout').value, 10) || 30,
+    second_opinion: $('second').value
+  };
+}
+
+function post(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  }).then(function (r) { return r.json(); });
+}
+
+function banner(message, bad) {
+  var el = $('result');
+  el.textContent = message;
+  el.className = 'banner ' + (bad ? 'err' : 'ok');
+  el.hidden = !message;
+}
+
+$('planBtn').addEventListener('click', function () {
+  var o = options();
+  if (!o.backup) { banner('Give me the path to a backup file first.', true); return; }
+  $('planline').textContent = 'checking…';
+  post('/api/plan', o).then(function (r) {
+    if (r.error) { $('planline').textContent = ''; banner(r.error, true); return; }
+    banner('');
+    $('planline').innerHTML =
+      '<b>' + r.analyze + '</b> to analyse · ' +
+      '<b>' + r.skip + '</b> already yours · ' +
+      '<b>' + r.review + '</b> held for review';
+  });
+});
+
+$('runBtn').addEventListener('click', function () {
+  var o = options();
+  if (!o.backup) { banner('Give me the path to a backup file first.', true); return; }
+  banner('');
+  post('/api/run', o).then(function (r) {
+    if (r.error) banner(r.error, true);
+  });
+});
+
+$('stopBtn').addEventListener('click', function () {
+  post('/api/stop');
+  $('stopBtn').disabled = true;
+});
+
+$('oracleBtn').addEventListener('click', function () {
+  var o = options();
+  if (!o.backup) { banner('The oracle needs a backup file to sample from.', true); return; }
+  post('/api/oracle/run', {
+    backup: o.backup,
+    count: parseInt($('oracleCount').value, 10) || 200
+  }).then(function (r) { if (r.error) banner(r.error, true); });
+});
+
+// The log is only redrawn when it changes, so a three-hour run does not fight
+// the browser for the scrollbar every second.
+var lastLog = 0;
+var pinned = true;
+$('log').addEventListener('scroll', function () {
+  var el = $('log');
+  pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+});
+
+function render(s) {
+  $('activity').textContent = s.stopping ? 'Stopping after this track…' : (s.activity || 'Idle');
+  $('done').textContent = s.done;
+  $('total').textContent = s.total;
+  $('analyzed').textContent = s.analyzed;
+  $('failed').textContent = s.failed;
+  $('bar').style.width = s.total ? (100 * s.done / s.total) + '%' : '0';
+  $('runBtn').disabled = s.running;
+  $('stopBtn').hidden = !s.running;
+  if (!s.running) $('stopBtn').disabled = false;
+  if (s.result) banner(s.result, /failed|could not|not found/i.test(s.result));
+
+  if (s.log.length !== lastLog) {
+    lastLog = s.log.length;
+    var el = $('log');
+    el.innerHTML = s.log.map(function (line) {
+      var safe = line.replace(/[&<>]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c];
+      });
+      return /FAILED|could not/.test(line) ? '<span class="fail">' + safe + '</span>' : safe;
+    }).join('\n');
+    if (pinned) el.scrollTop = el.scrollHeight;
+  }
+}
+
+function poll() {
+  fetch('/api/state')
+    .then(function (r) { return r.json(); })
+    .then(render)
+    .catch(function () { $('activity').textContent = 'Server not responding'; })
+    .then(function () { setTimeout(poll, 700); });
+}
+poll();
+
+// The oracle section only appears if this machine actually has one. On a
+// friend's machine it simply is not there.
+fetch('/api/oracle').then(function (r) { return r.json(); }).then(function (o) {
+  if (!o.present) return;
+  $('oracleCard').hidden = false;
+  $('oracleCached').textContent = o.cached_tracks
+    ? o.cached_tracks + ' tracks already downloaded — a re-run is minutes, not half an hour.'
+    : 'Nothing downloaded yet; the first run fetches the audio.';
+});
+</script>
+</body>
+</html>

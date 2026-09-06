@@ -19,3 +19,6 @@ symphonia = { version = "0.5", features = ["aac", "isomp4", "mp3", "ogg", "vorbi
 bindgen = "0.70"
 cc = { version = "1", features = ["parallel"] }
 pkg-config = "0.3"
+
+[dev-dependencies]
+serde_json = { workspace = true }

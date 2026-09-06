@@ -71,7 +71,6 @@ impl Analyzer for RecordingAnalyzer {
             key_strength: 0.8,
             energy: Some(7),
             energy_score: None,
-            bpm_folded_from: None,
             bpm_method: None,
             bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
@@ -126,8 +125,7 @@ impl Fixture {
                 force,
                 limit: None,
                 max_attempts: 3,
-                tempo_min: analyzer_analysis::bpm::DEFAULT_TEMPO_MIN,
-                second_opinion: "Auto".into(),
+                second_opinion: "Always".into(),
             },
             dir,
         }

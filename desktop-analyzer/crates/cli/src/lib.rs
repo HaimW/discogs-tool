@@ -3,6 +3,7 @@
 
 pub mod adapter;
 pub mod progress;
+pub mod ui;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,7 +21,7 @@ use analyzer_core::{merged_records, ANALYZER_VERSION};
 /// of that is comparability: a run that mixes tempos from two different
 /// detectors is worse than one that redoes the work. Bump this whenever a
 /// change alters the numbers the detectors produce.
-pub const ALGORITHM_TAG: &str = "bpm:beat-grid-v4-folded-2nd;key:libkeyfinder-2.2";
+pub const ALGORITHM_TAG: &str = "bpm:beat-grid-v6-body-2nd-nofold;key:libkeyfinder-2.2";
 
 pub struct Options {
     pub backup: PathBuf,
@@ -30,10 +31,6 @@ pub struct Options {
     pub force: bool,
     pub limit: Option<usize>,
     pub max_attempts: u32,
-    /// Lower edge of the one-octave band tempos are folded into. Part of the
-    /// settings hash: changing it changes the numbers, so a ledger written
-    /// under a different band is not resumed.
-    pub tempo_min: f64,
     /// Recorded in the settings hash: changing when a second detector runs
     /// changes the numbers, so a ledger written under a different policy is
     /// not resumed.
@@ -46,12 +43,48 @@ pub struct Outcome {
     pub written: usize,
     /// What the energy ranking pass did, and what it could not do.
     pub energy: analyzer_core::meta::EnergyRanking,
-    /// How many exported tempos were octave-corrected by the `--tempo-min`
-    /// band. Worth seeing: a large number means the band may be wrong.
-    pub tempo_folded: usize,
     /// Ids left alone because they held a human's data and `--force` was off.
     pub protected: Vec<String>,
     pub interrupted: bool,
+}
+
+/// Where to find yt-dlp: an explicit path, then beside the binary, then the
+/// `binaries/` directory, then `$PATH`.
+///
+/// Lives here rather than in `main` because the UI needs it too, and a UI that
+/// disagreed with the CLI about which yt-dlp to use would be a memorable bug.
+pub fn resolve_yt_dlp(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
+    if let Some(path) = explicit {
+        if !path.exists() {
+            return Err(format!("no yt-dlp at {}", path.display()));
+        }
+        return Ok(path);
+    }
+    let mut candidates = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join(yt_dlp_name()));
+            // Running from `cargo run`, where the binary sits in target/debug.
+            candidates.push(dir.join("../../binaries").join(yt_dlp_name()));
+            candidates.push(dir.join("../../../binaries").join(yt_dlp_name()));
+        }
+    }
+    candidates.push(PathBuf::from("binaries").join(yt_dlp_name()));
+    for candidate in candidates {
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+    // Not found locally: fall back to $PATH and let the version check report it.
+    Ok(PathBuf::from(yt_dlp_name()))
+}
+
+fn yt_dlp_name() -> &'static str {
+    if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    }
 }
 
 /// Print what a run would do, without downloading anything.
@@ -122,7 +155,6 @@ pub fn execute(
     let hash = settings_hash(&[
         ANALYZER_VERSION,
         ALGORITHM_TAG,
-        &format!("tempo-min:{}", options.tempo_min),
         &format!("second-opinion:{}", options.second_opinion),
     ]);
     let now = clock.now_iso8601();
@@ -153,7 +185,6 @@ pub fn execute(
     // the other records: it is a rank within the collection, so it cannot be
     // decided while the collection is still being analysed.
     let energy = analyzer_core::meta::rank_energy(&mut outcome.records);
-    let tempo_folded = outcome.records.iter().filter(|r| r.bpm_folded_from.is_some()).count();
     let export = MetaExport::new(
         clock.now_iso8601(),
         format!("desktop-analyzer {ANALYZER_VERSION}"),
@@ -170,7 +201,6 @@ pub fn execute(
         summary,
         written: export.track_meta.len(),
         energy,
-        tempo_folded,
         protected: outcome.protected,
         interrupted: should_stop(),
     })

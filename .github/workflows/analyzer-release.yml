@@ -1,0 +1,111 @@
+name: Analyzer release
+
+# Tag a release to publish binaries:
+#
+#     git tag analyzer-v0.1.0 && git push origin analyzer-v0.1.0
+#
+# Binaries are attached to the GitHub release, never committed. They are tens of
+# megabytes each, they are platform-specific, and git keeps every version of
+# every blob forever — a repo that is 6 MB today would not stay that way.
+on:
+  push:
+    tags: ['analyzer-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop-analyzer
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # bindgen needs libclang; everything else the analyzer links is either
+      # vendored or built by the script below.
+      - name: Install libclang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
+
+      - name: Cache the native libraries
+        uses: actions/cache@v4
+        with:
+          path: desktop-analyzer/native
+          key: native-${{ matrix.target }}-${{ hashFiles('desktop-analyzer/scripts/build-native.sh') }}
+
+      - name: Build FFTW and libkeyfinder
+        run: ./scripts/build-native.sh
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Test
+        run: cargo test --workspace
+
+      # The whole point of the vendoring work: check that we did not
+      # accidentally reintroduce a dependency on the build machine.
+      - name: Check the binary is self-contained
+        if: runner.os == 'Linux'
+        run: |
+          echo "linked against:"
+          ldd target/release/discogs-analyzer
+          unexpected=$(ldd target/release/discogs-analyzer \
+            | grep -oE '\b(lib[a-z0-9_+-]+)\.so' \
+            | grep -vE '^(libstdc\+\+|libgcc_s|libm|libc|libdl|libpthread|librt)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "unexpected shared libraries: $unexpected" >&2
+            exit 1
+          fi
+          echo "self-contained"
+
+      - name: Package
+        run: |
+          NAME="discogs-analyzer-${{ matrix.target }}"
+          mkdir -p "dist/$NAME"
+          cp target/release/discogs-analyzer "dist/$NAME/"
+          cp README.md "dist/$NAME/"
+          cp ../LICENSE "dist/$NAME/" 2>/dev/null || true
+          cp scripts/get-yt-dlp.sh "dist/$NAME/"
+          cd dist && tar czf "$NAME.tar.gz" "$NAME"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: desktop-analyzer/dist/*.tar.gz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: dist, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          body: |
+            Desktop BPM/key analyzer.
+
+            Download the archive for your platform, unpack it, then:
+
+                ./get-yt-dlp.sh          # fetches a current yt-dlp
+                ./discogs-analyzer --ui  # opens the interface in your browser
+
+            yt-dlp is fetched rather than bundled on purpose: it exists to keep
+            up with YouTube's changes, and a copy frozen at release time stops
+            working.

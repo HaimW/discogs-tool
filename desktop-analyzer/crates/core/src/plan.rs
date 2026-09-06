@@ -72,7 +72,15 @@ impl Plan {
             .collection
             .releases
             .iter()
-            .map(|r| (r.id, crate::tempo::hint_for_styles(r.styles.as_deref().unwrap_or(""))))
+            .map(|r| {
+                (
+                    r.id,
+                    crate::tempo::hint_for_release(
+                        r.genres.as_deref().unwrap_or(""),
+                        r.styles.as_deref().unwrap_or(""),
+                    ),
+                )
+            })
             .collect();
         let items = backup
             .collection

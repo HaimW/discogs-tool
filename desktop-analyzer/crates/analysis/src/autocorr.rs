@@ -18,8 +18,6 @@
 //! precise figure, this supplies the sanity check on which pulse that figure is
 //! counting. See `reconcile` in the crate root.
 
-use crate::bpm::TempoBand;
-
 /// Frames per second of the onset envelope: 44.1 kHz over a 512-sample hop is
 /// about 86 Hz, matching the tempo detector's own hop so the two see the same
 /// time resolution.
@@ -44,14 +42,13 @@ const COMB_TEETH: usize = 4;
 /// figure that gets reported.
 const SEARCH_STEP_BPM: f64 = 0.1;
 
-/// Centre of the tempo prior, in BPM, used only when no band was given.
+/// Centre of the tempo prior, in BPM.
 ///
 /// A comb filter cannot tell a tempo from half of it: at period 2P the teeth
 /// land on 2P, 4P, 6P, 8P, every one of them a real beat, so it scores exactly
 /// what period P scores. Something outside the correlation has to break the
-/// tie, and "dance music is usually nearer 125 than 62" is the honest form of
-/// that something. When a band *is* given the tie never arises, because only
-/// one octave is searched.
+/// tie, and "music is usually nearer 125 than 62" is the honest form of that
+/// something. It is a weak thumb on the scale, not a decision.
 const PRIOR_CENTRE_BPM: f64 = 125.0;
 
 /// Width of the prior in octaves. Wide enough that 170 and 85 are both credible
@@ -71,7 +68,7 @@ pub struct Estimate {
 ///
 /// Returns `None` when the audio is too short to hold several beats, or when
 /// nothing periodic was found at all.
-pub fn estimate(samples: &[f32], sample_rate: u32, band: TempoBand) -> Option<Estimate> {
+pub fn estimate(samples: &[f32], sample_rate: u32) -> Option<Estimate> {
     if sample_rate == 0 {
         return None;
     }
@@ -91,26 +88,13 @@ pub fn estimate(samples: &[f32], sample_rate: u32, band: TempoBand) -> Option<Es
     // most of a frame out of place, so the true tempo scores worse than a 3:2
     // relative whose multiples happen to land squarely. Interpolating a
     // fractional period removes the problem at the root.
-    // Searching inside the band when there is one removes the octave ambiguity
-    // rather than arbitrating it: exactly one octave is on the table, so the
-    // comb only has to choose the pulse within it. The genre already made the
-    // octave decision, and it knows more than a prior does.
-    let (from, to) = match band.min() {
-        Some(min) => (min.max(SEARCH_MIN_BPM), (min * 2.0).min(SEARCH_MAX_BPM)),
-        None => (SEARCH_MIN_BPM, SEARCH_MAX_BPM),
-    };
-    if to <= from {
-        return None;
-    }
-    let use_prior = band.min().is_none();
-
     let mut best: Option<(f64, f64)> = None;
     let mut total = 0.0;
     let mut count = 0.0;
-    let mut bpm = from;
-    while bpm <= to {
+    let mut bpm = SEARCH_MIN_BPM;
+    while bpm <= SEARCH_MAX_BPM {
         let period = frame_rate * 60.0 / bpm;
-        let score = comb_score(&acf, period) * if use_prior { prior(bpm) } else { 1.0 };
+        let score = comb_score(&acf, period) * prior(bpm);
         total += score;
         count += 1.0;
         if best.is_none_or(|(_, b)| score > b) {
@@ -129,7 +113,7 @@ pub fn estimate(samples: &[f32], sample_rate: u32, band: TempoBand) -> Option<Es
     } else {
         0.0
     };
-    Some(Estimate { bpm: crate::bpm::fold_into(bpm, band), strength })
+    Some(Estimate { bpm, strength })
 }
 
 /// Log-normal weighting over tempo, centred on [`PRIOR_CENTRE_BPM`].
@@ -273,7 +257,7 @@ mod tests {
     #[test]
     fn a_click_track_is_measured_within_a_couple_of_percent() {
         for target in [90.0, 120.0, 128.0, 140.0] {
-            let e = estimate(&clicks(target, 40.0), SR, TempoBand::unfolded())
+            let e = estimate(&clicks(target, 40.0), SR)
                 .unwrap_or_else(|| panic!("no estimate at {target}"));
             let error = (e.bpm - target).abs() / target;
             assert!(error < 0.03, "{target} BPM read as {:.2} ({:.1}%)", e.bpm, error * 100.0);
@@ -284,14 +268,14 @@ mod tests {
     fn a_fast_click_track_is_not_reported_at_half_speed() {
         // The comb filter exists for this: at 170 the naive peak is often the
         // 2-beat period, because every other onset also lines up there.
-        let e = estimate(&clicks(170.0, 40.0), SR, TempoBand::unfolded()).expect("estimate");
+        let e = estimate(&clicks(170.0, 40.0), SR).expect("estimate");
         assert!((e.bpm - 170.0).abs() / 170.0 < 0.03, "read {:.2}", e.bpm);
     }
 
     #[test]
     fn silence_has_no_tempo_worth_reporting() {
         let silence = vec![0.0f32; SR as usize * 30];
-        let strength = estimate(&silence, SR, TempoBand::unfolded()).map(|e| e.strength);
+        let strength = estimate(&silence, SR).map(|e| e.strength);
         assert!(
             strength.is_none_or(|s| s < 0.5),
             "silence reported strength {strength:?}"
@@ -300,12 +284,7 @@ mod tests {
 
     #[test]
     fn audio_too_short_to_hold_several_beats_is_refused() {
-        assert!(estimate(&clicks(120.0, 1.0), SR, TempoBand::unfolded()).is_none());
+        assert!(estimate(&clicks(120.0, 1.0), SR).is_none());
     }
 
-    #[test]
-    fn the_result_is_folded_into_the_band_it_was_given() {
-        let e = estimate(&clicks(160.0, 40.0), SR, TempoBand::from_min(70.0)).expect("estimate");
-        assert!((70.0..140.0).contains(&e.bpm), "{:.2} is outside 70-140", e.bpm);
-    }
 }

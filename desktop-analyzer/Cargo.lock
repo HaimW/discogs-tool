@@ -19,6 +19,7 @@ dependencies = [
  "bindgen",
  "cc",
  "pkg-config",
+ "serde_json",
  "symphonia",
 ]
 
@@ -31,6 +32,7 @@ dependencies = [
  "analyzer-download",
  "clap",
  "ctrlc",
+ "serde",
  "serde_json",
 ]
 

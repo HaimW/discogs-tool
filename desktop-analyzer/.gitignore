@@ -4,3 +4,10 @@
 
 # The yt-dlp sidecar binary is fetched at setup time, not vendored.
 /binaries
+
+# The oracle is a dev tool: its virtualenv, audio and results never belong in git.
+oracle/.venv/
+oracle/work/
+
+# Native static libraries, built by scripts/build-native.sh.
+native/
