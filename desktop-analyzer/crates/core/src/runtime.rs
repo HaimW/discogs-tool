@@ -203,6 +203,100 @@ fn sync_dir(dir: Option<&Path>) {
     let _ = dir;
 }
 
+/// Translate a Windows path into the one this process can actually open.
+///
+/// The analyzer is very often run under WSL, where the natural thing to paste
+/// is `C:\Users\you\Downloads\backup.json` — and where that path does not
+/// exist, because the process is Linux and knows only `/mnt/c/...`. Refusing it
+/// with "no such file" is technically true and unhelpful: the file is right
+/// there, under a name the user has no reason to know.
+///
+/// Returns `None` for anything that is not a drive-lettered Windows path, so
+/// ordinary paths are untouched.
+fn windows_to_wsl(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    let mut chars = raw.chars();
+    let drive = chars.next()?;
+    if !drive.is_ascii_alphabetic() || chars.next()? != ':' {
+        return None;
+    }
+    // `C:` alone, `C:\...` and `C:/...` are all drive-rooted. `C:foo` is a
+    // per-drive relative path, which has no sane translation.
+    let rest = &raw[2..];
+    if !rest.is_empty() && !rest.starts_with('\\') && !rest.starts_with('/') {
+        return None;
+    }
+    let tail = rest.replace('\\', "/");
+    Some(format!("/mnt/{}{}", drive.to_ascii_lowercase(), tail))
+}
+
+/// A path as the user typed it, translated if this is WSL and they typed
+/// Windows.
+///
+/// The translation only happens when the drive is actually mounted, so on a
+/// plain Linux box `C:\...` stays as it was and the error names the path that
+/// was typed rather than one invented here.
+pub fn user_path(raw: &str) -> PathBuf {
+    if let Some(translated) = windows_to_wsl(raw) {
+        let mount = translated.split('/').take(3).collect::<Vec<_>>().join("/");
+        if Path::new(&mount).is_dir() {
+            return PathBuf::from(translated);
+        }
+    }
+    PathBuf::from(raw)
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn a_windows_path_becomes_the_one_wsl_can_open() {
+        assert_eq!(
+            windows_to_wsl("C:\\Users\\yafim\\Downloads\\backup.json").as_deref(),
+            Some("/mnt/c/Users/yafim/Downloads/backup.json")
+        );
+    }
+
+    #[test]
+    fn the_drive_letter_is_lowercased_and_slashes_go_forward() {
+        assert_eq!(windows_to_wsl("D:/Music/x.json").as_deref(), Some("/mnt/d/Music/x.json"));
+        assert_eq!(windows_to_wsl("c:\\a\\b").as_deref(), Some("/mnt/c/a/b"));
+    }
+
+    #[test]
+    fn a_bare_drive_is_its_mount_point() {
+        assert_eq!(windows_to_wsl("C:").as_deref(), Some("/mnt/c"));
+        assert_eq!(windows_to_wsl("C:\\").as_deref(), Some("/mnt/c/"));
+    }
+
+    #[test]
+    fn ordinary_paths_are_left_alone() {
+        for path in ["/mnt/c/Users/x", "analysis.json", "./out.json", "~/Downloads/x.json", ""] {
+            assert_eq!(windows_to_wsl(path), None, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_drive_relative_path_has_no_sane_translation() {
+        // "C:foo" means "foo, relative to the current directory on C:", which
+        // is a concept WSL does not have. Better left untouched than guessed.
+        assert_eq!(windows_to_wsl("C:foo"), None);
+    }
+
+    #[test]
+    fn a_colon_that_is_not_a_drive_is_not_a_drive() {
+        assert_eq!(windows_to_wsl("http://example.com/x.json"), None);
+        assert_eq!(windows_to_wsl("1:/x"), None);
+    }
+
+    #[test]
+    fn user_path_leaves_a_path_alone_when_the_drive_is_not_mounted() {
+        // On a machine with no /mnt/z, the error should name what was typed.
+        assert_eq!(user_path("Z:\\nope\\x.json"), PathBuf::from("Z:\\nope\\x.json"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

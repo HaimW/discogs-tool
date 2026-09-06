@@ -128,7 +128,8 @@ function analyzerConnected(state) {
             'paths on <em>that</em> machine — the browser never sees your files.</p>' +
             '<div class="analyzer-grid">' +
             '<label class="meta-field wide"><span>Backup file</span>' +
-            '<input type="text" id="an-backup" placeholder="/path/to/vinyl-backup.json"></label>' +
+            '<input type="text" id="an-backup" placeholder="/path/to/vinyl-backup.json">' +
+            '<span class="hint">A path on the analyzer\u2019s machine. Windows paths work too.</span></label>' +
             '<label class="meta-field"><span>Write result to</span>' +
             '<input type="text" id="an-output" value="analysis.json"></label>' +
             '<label class="meta-field"><span>Stop after</span>' +

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use analyzer_cli::adapter::FileAnalyzer;
 use analyzer_cli::progress::Renderer;
 use analyzer_cli::{default_ledger_for, execute, plan_only, Options, resolve_yt_dlp};
+use analyzer_core::runtime::user_path;
 use analyzer_core::runtime::SystemClock;
 use analyzer_core::ANALYZER_VERSION;
 use analyzer_download::YtDlp;
@@ -127,6 +128,14 @@ impl From<SecondOpinionArg> for analyzer_core::tempo::SecondOpinion {
     }
 }
 
+/// `user_path` for an argument clap has already turned into a `PathBuf`.
+fn user_path_of(path: PathBuf) -> PathBuf {
+    match path.to_str() {
+        Some(text) => user_path(text),
+        None => path,
+    }
+}
+
 fn main() {
     if let Err(message) = run() {
         eprintln!("error: {message}");
@@ -142,15 +151,18 @@ fn run() -> Result<(), String> {
         return analyzer_cli::ui::serve(args.ui_port, !args.no_open, args.allow_origin);
     }
 
-    // Clap guarantees this is present unless `--ui` was given, which returned above.
-    let backup = args.backup.clone().expect("backup is required without --ui");
+    // Clap guarantees this is present unless `--ui` was given, which returned
+    // above. Paths go through `user_path` so a Windows path pasted into a WSL
+    // shell resolves, the same as in the UI.
+    let backup = user_path_of(args.backup.clone().expect("backup is required without --ui"));
+    let output = user_path_of(args.output.clone());
 
     if args.plan {
         plan_only(&backup, args.force, &mut stdout)?;
         return Ok(());
     }
 
-    let yt_dlp = resolve_yt_dlp(args.yt_dlp)?;
+    let yt_dlp = resolve_yt_dlp(args.yt_dlp.clone().map(user_path_of))?;
     let downloader = YtDlp::new(&yt_dlp).with_timeout(args.timeout);
     // Fail here rather than on the first track: a missing or unrunnable binary
     // is worth knowing about before a long run starts.
@@ -164,12 +176,13 @@ fn run() -> Result<(), String> {
         FileAnalyzer::new(&clock, ANALYZER_VERSION).with_second_opinion(args.second_opinion.into());
 
     let options = Options {
-        ledger: args.ledger.unwrap_or_else(|| default_ledger_for(&args.output)),
+        ledger: args.ledger.map(user_path_of).unwrap_or_else(|| default_ledger_for(&output)),
         work_dir: args
             .work_dir
+            .map(user_path_of)
             .unwrap_or_else(|| std::env::temp_dir().join("discogs-analyzer")),
         backup,
-        output: args.output,
+        output: output.clone(),
         force: args.force,
         limit: args.limit,
         max_attempts: args.max_attempts,

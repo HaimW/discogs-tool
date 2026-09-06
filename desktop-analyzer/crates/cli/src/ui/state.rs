@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use analyzer_core::pipeline::Progress;
+use analyzer_core::runtime::user_path;
 use analyzer_core::tempo::SecondOpinion;
 use analyzer_download::YtDlp;
 
@@ -75,7 +76,7 @@ impl UiState {
 
     /// Dry run: what would this backup produce?
     pub fn plan(&self, body: &serde_json::Value) -> serde_json::Value {
-        let backup = PathBuf::from(body["backup"].as_str().unwrap_or(""));
+        let backup = user_path(body["backup"].as_str().unwrap_or(""));
         if !backup.is_file() {
             return serde_json::json!({ "error": format!("no such file: {}", backup.display()) });
         }
@@ -117,7 +118,7 @@ impl UiState {
             Ok(o) => o,
             Err(e) => return release_on_error(self, e),
         };
-        let yt_dlp = body["yt_dlp"].as_str().filter(|s| !s.is_empty()).map(PathBuf::from);
+        let yt_dlp = body["yt_dlp"].as_str().filter(|s| !s.is_empty()).map(user_path);
         let timeout = body["timeout"].as_u64().unwrap_or(30) as u32;
 
         {
@@ -140,22 +141,25 @@ impl UiState {
 }
 
 fn options_from(body: &serde_json::Value) -> Result<Options, String> {
-    let backup = PathBuf::from(body["backup"].as_str().unwrap_or(""));
+    // Every path here is one someone typed, so every one goes through
+    // `user_path` — a Windows path pasted into WSL is translated, anything else
+    // is untouched.
+    let backup = user_path(body["backup"].as_str().unwrap_or(""));
     if !backup.is_file() {
         return Err(format!("no such backup file: {}", backup.display()));
     }
-    let output = PathBuf::from(
+    let output = user_path(
         body["output"].as_str().filter(|s| !s.is_empty()).unwrap_or("analysis.json"),
     );
     let ledger = body["ledger"]
         .as_str()
         .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+        .map(user_path)
         .unwrap_or_else(|| default_ledger_for(&output));
     let work_dir = body["work_dir"]
         .as_str()
         .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+        .map(user_path)
         .unwrap_or_else(|| std::env::temp_dir().join("discogs-analyzer"));
     let second_opinion = match body["second_opinion"].as_str().unwrap_or("always") {
         "never" => "Never",
