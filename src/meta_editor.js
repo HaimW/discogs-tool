@@ -8,6 +8,63 @@ function pct(v) {
     return Math.round(Math.max(0, Math.min(1, n)) * 100) + '%';
 }
 
+// Everything the analyzer recorded about how it reached its answer.
+//
+// These figures were previously stored and never shown, which made a disputed
+// reading indistinguishable from a confident one at the point where you would
+// actually fix it. The tempo cross-check in particular is worthless if you
+// cannot see that two detectors disagreed and what the other one said.
+function metaProvenanceHtml(meta) {
+    var rows = [];
+
+    // Both figures are normalised 0-1 by the analyzer, so they are safe to show
+    // as percentages. aubio's own confidence is unbounded and is scaled before
+    // it ever reaches this record.
+    if (meta.bpm_confidence != null) {
+        rows.push(['BPM confidence', pct(meta.bpm_confidence) +
+            (meta.bpm_confidence <= 0.35 ? ' — low, worth checking by ear' : '')]);
+    }
+    if (meta.key_strength != null) {
+        rows.push(['Key agreement', pct(meta.key_strength) +
+            (meta.key_strength <= 0.5 ? ' — the segments disagreed' : '')]);
+    }
+
+    // How the tempo was decided. Only interesting when more than one method was
+    // involved, which is why the plain single-detector case is not named.
+    var METHOD = {
+        'beat-grid-confirmed': 'two detectors agreed',
+        'beat-grid-rescaled': 'corrected onto the right pulse (the first detector was counting half-beats)',
+        'autocorrelation': 'the second detector overruled the first',
+        'disputed': 'the two detectors disagreed and neither was convincing'
+    };
+    if (meta.bpm_method && METHOD[meta.bpm_method]) {
+        rows.push(['How', METHOD[meta.bpm_method]]);
+    }
+    if (meta.bpm_second_opinion != null) {
+        rows.push(['Second detector said', meta.bpm_second_opinion + ' BPM']);
+    }
+    if (meta.bpm_folded_from != null) {
+        rows.push(['Before octave correction', meta.bpm_folded_from + ' BPM']);
+    }
+    if (meta.energy_score != null) {
+        rows.push(['Energy score', Number(meta.energy_score).toFixed(2) +
+            ' — ranked against the rest of your collection']);
+    }
+    if (meta.analyzed_at) {
+        rows.push(['Analysed', String(meta.analyzed_at).slice(0, 10) +
+            (meta.analyzer_version ? ' by v' + meta.analyzer_version : '')]);
+    }
+
+    var disputed = meta.bpm_method === 'disputed';
+    return '<div class="meta-provenance' + (disputed ? ' meta-provenance-warn' : '') + '">' +
+        '<div class="mp-head">Estimated by the desktop analyzer. ' +
+        'Tick &ldquo;BPM/key verified&rdquo; once you have checked it.</div>' +
+        (rows.length ? '<dl class="mp-rows">' + rows.map(function (r) {
+            return '<dt>' + escHtml(r[0]) + '</dt><dd>' + escHtml(String(r[1])) + '</dd>';
+        }).join('') + '</dl>' : '') +
+        '</div>';
+}
+
 // bpm/key as they were when the editor opened, keyed by metaId. Saving compares
 // against these so only a genuine edit marks a value as human-entered.
 var _metaEditorLoaded = {};
@@ -72,19 +129,7 @@ function renderTrackMetaEditor(panel, metaId) {
 
         var estimated = (meta.bpm_source === 'analysis' || meta.key_source === 'analysis' ||
                          meta.energy_source === 'analysis');
-        var provenance = '';
-        if (estimated && !meta.bpm_verified) {
-            var bits = [];
-            // Both figures are normalised 0-1 by the analyzer, so they are safe
-            // to show as percentages. aubio's own confidence is unbounded and is
-            // scaled before it ever reaches this record.
-            if (meta.bpm_confidence != null) bits.push('BPM confidence ' + pct(meta.bpm_confidence));
-            if (meta.key_strength != null) bits.push('key agreement ' + pct(meta.key_strength));
-            provenance =
-                '<div class="meta-provenance">Estimated by the desktop analyzer' +
-                (bits.length ? ' &mdash; ' + escHtml(bits.join(', ')) : '') +
-                '. Tick &ldquo;BPM/key verified&rdquo; once you have checked it.</div>';
-        }
+        var provenance = estimated && !meta.bpm_verified ? metaProvenanceHtml(meta) : '';
 
         panel.innerHTML =
             '<div class="meta-grid">' +

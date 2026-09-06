@@ -342,8 +342,17 @@ function renderSetlist(setlistId) {
                     '<div class="track-sub-line">' + escHtml(t.artist || '') + '</div>' +
                     '</div>';
                 html += '<span class="track-badges">';
-                if (meta.bpm != null) html += '<span class="track-badge badge-bpm">' + meta.bpm + '</span>';
-                if (meta.key) html += camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
+                // Same badges as the release page. A setlist is where the key
+                // and energy matter most — it is the running order — so the two
+                // views showing different amounts of information would be odd.
+                if (meta.bpm != null) html += bpmBadge(meta);
+                if (meta.key) {
+                    html += camelotChip(meta.key, {
+                        estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
+                        musical: meta.key_musical || true
+                    });
+                }
+                html += energyBadge(meta);
                 if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                 html += '</span>';
                 html += '<button class="meta-btn" onclick="removeTrackFromSetlist(' + sl.id + ',' + i + ')" title="Remove">&times;</button>';

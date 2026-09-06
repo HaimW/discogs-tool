@@ -103,7 +103,16 @@ function renderRelease(releaseId) {
                 if (meta) {
                     html += '<span class="track-badges">';
                     html += bpmBadge(meta);
-                    if (meta.key) html += camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
+                    if (meta.key) {
+                        html += camelotChip(meta.key, {
+                            estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
+                            // Prefer the name the record actually stores over the
+                            // one the table would derive: if an older record
+                            // disagrees, show what is there rather than hiding it.
+                            musical: meta.key_musical || true
+                        });
+                    }
+                    html += energyBadge(meta);
                     if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                     if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
                     html += '</span>';
@@ -196,27 +205,6 @@ function rank(meta) {
     return 1;
 }
 
-// The tempo badge, marked as an estimate unless a human has confirmed it.
-//
-// Kept separate from the key chip because the two answer different questions:
-// `camelotChip` also carries the Camelot colour, while this is just a number
-// that must not look more certain than it is. After an analyzer run nearly
-// every value is an estimate, so an unmarked figure would be actively
-// misleading.
-function bpmBadge(meta) {
-    if (meta.bpm == null || meta.bpm === '') return '';
-    var estimated = meta.bpm_source === 'analysis' && !meta.bpm_verified;
-    var title = estimated
-        ? 'Estimated by analysis' +
-          (meta.bpm_confidence != null ? ' — confidence ' + pct(meta.bpm_confidence) : '')
-        : 'BPM';
-    return '<span class="track-badge badge-bpm' + (estimated ? ' badge-estimated' : '') +
-        '" title="' + escHtml(title) + '">' +
-        escHtml(String(meta.bpm)) + ' BPM' +
-        (estimated ? '<span class="badge-est">~</span>' : '') +
-        '</span>';
-}
-
 function vinylTracklistHtml(tracks, lookup) {
     var sides = {};
     var sideOrder = [];
@@ -237,9 +225,13 @@ function vinylTracklistHtml(tracks, lookup) {
         }
         sides[side].forEach(function (t) {
             var meta = lookup ? lookup(t) : null;
-            var badges = !meta ? '' : (bpmBadge(meta) + (meta.key
-                ? camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified })
-                : ''));
+            var badges = !meta ? '' : (
+                bpmBadge(meta) +
+                (meta.key ? camelotChip(meta.key, {
+                    estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
+                    musical: meta.key_musical || true
+                }) : '') +
+                energyBadge(meta));
             html += '<div class="vt-track">' +
                 '<span class="vt-pos">' + escHtml(t.position || '') + '</span>' +
                 '<span class="vt-title">' + escHtml(t.title || '') + '</span>' +
