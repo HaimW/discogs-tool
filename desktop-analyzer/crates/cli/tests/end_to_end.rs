@@ -5,7 +5,7 @@
 //! structures: resumability across a restart, and never overwriting a human's
 //! BPM/key without `--force`.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,13 +56,13 @@ impl Downloader for StubDownloader {
 /// for redoing work.
 #[derive(Default)]
 struct RecordingAnalyzer {
-    seen: RefCell<Vec<String>>,
+    seen: Mutex<Vec<String>>,
 }
 
 impl Analyzer for RecordingAnalyzer {
     fn analyze(&self, path: &Path, _hint: analyzer_core::tempo::TempoHint) -> Result<AnalysisResult, StepError> {
         let id = path.file_stem().unwrap().to_string_lossy().to_string();
-        self.seen.borrow_mut().push(id);
+        self.seen.lock().unwrap().push(id);
         Ok(AnalysisResult {
             bpm: 124.0,
             bpm_confidence: 0.97,
@@ -125,6 +125,8 @@ impl Fixture {
                 force,
                 limit: None,
                 max_attempts: 3,
+                downloads_at_once: 1,
+                analysers_at_once: 1,
                 second_opinion: "Always".into(),
             },
             dir,
@@ -133,11 +135,11 @@ impl Fixture {
 
     /// Run, stopping after `stop_after` items when given.
     fn run(&self, analyzer: &RecordingAnalyzer, stop_after: Option<usize>) -> analyzer_cli::Outcome {
-        let seen = RefCell::new(0usize);
+        let seen = Mutex::new(0usize);
         let should_stop = || match stop_after {
             None => false,
             Some(n) => {
-                let mut s = seen.borrow_mut();
+                let mut s = seen.lock().unwrap();
                 if *s >= n {
                     return true;
                 }
@@ -205,7 +207,7 @@ fn a_verified_record_never_reaches_the_export_at_all() {
         "a bpm_verified record must not appear in the export"
     );
     assert!(
-        !analyzer.seen.borrow().contains(&"1_bbb".to_string()),
+        !analyzer.seen.lock().unwrap().contains(&"1_bbb".to_string()),
         "a protected track should not even be downloaded"
     );
 }
@@ -261,14 +263,14 @@ fn an_interrupted_run_resumes_from_the_ledger_without_redoing_work() {
     assert!(first.interrupted);
     assert!(f.options.ledger.exists(), "the ledger must be on disk to resume from");
 
-    let first_seen: HashSet<String> = first_analyzer.seen.borrow().iter().cloned().collect();
+    let first_seen: HashSet<String> = first_analyzer.seen.lock().unwrap().iter().cloned().collect();
     assert_eq!(first_seen.len(), 1);
 
     // A fresh analyzer stands in for a fresh process: it knows nothing except
     // what the ledger file carries.
     let second_analyzer = RecordingAnalyzer::default();
     let second = f.run(&second_analyzer, None);
-    let second_seen: HashSet<String> = second_analyzer.seen.borrow().iter().cloned().collect();
+    let second_seen: HashSet<String> = second_analyzer.seen.lock().unwrap().iter().cloned().collect();
 
     assert!(
         first_seen.is_disjoint(&second_seen),

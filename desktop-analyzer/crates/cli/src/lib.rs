@@ -31,6 +31,11 @@ pub struct Options {
     pub force: bool,
     pub limit: Option<usize>,
     pub max_attempts: u32,
+    /// Tracks downloaded at the same time. Part of the settings hash only in
+    /// spirit: it changes how fast a run goes, never what it produces.
+    pub downloads_at_once: usize,
+    /// Tracks analysed at the same time.
+    pub analysers_at_once: usize,
     /// Recorded in the settings hash: changing when a second detector runs
     /// changes the numbers, so a ledger written under a different policy is
     /// not resumed.
@@ -138,10 +143,10 @@ pub fn plan_only(backup_path: &Path, force: bool, out: &mut dyn Write) -> Result
 #[allow(clippy::too_many_arguments)]
 pub fn execute(
     options: &Options,
-    downloader: &dyn Downloader,
-    analyzer: &dyn Analyzer,
-    clock: &dyn Clock,
-    should_stop: &dyn Fn() -> bool,
+    downloader: &(dyn Downloader + Sync),
+    analyzer: &(dyn Analyzer + Sync),
+    clock: &(dyn Clock + Sync),
+    should_stop: &(dyn Fn() -> bool + Sync),
     on_progress: &mut dyn FnMut(Progress),
     out: &mut dyn Write,
 ) -> Result<Outcome, String> {
@@ -162,6 +167,8 @@ pub fn execute(
     report_resume(&resumed, &options.ledger, out);
 
     let run_options = RunOptions {
+        downloads_at_once: options.downloads_at_once,
+        analysers_at_once: options.analysers_at_once,
         work_dir: &options.work_dir,
         max_attempts: options.max_attempts,
         limit: options.limit,

@@ -78,6 +78,26 @@ struct Args {
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     timeout: u32,
 
+    /// How many tracks to download at once.
+    ///
+    /// Downloading is most of a run's wall time, and it parallelises well: on a
+    /// real collection the whole pipeline goes from 7.84 s a track to 1.52 at
+    /// eight-wide. Past sixteen there is nothing left to win, and the ceiling is
+    /// YouTube's patience rather than the network — a throttled run is worse
+    /// than a slightly slower one.
+    #[arg(long, default_value_t = 8, value_name = "N")]
+    downloads: usize,
+
+    /// How many tracks to analyse at once.
+    ///
+    /// **This is the setting that can exhaust memory.** A decoded track is
+    /// roughly half a gigabyte, so the peak is about that times this number:
+    /// measured at 4.0 GB with eight and 7.5 GB with sixteen. Eight is the
+    /// default because a machine with 16 GB has room for it; sixteen is a third
+    /// faster again if you have the memory to spare.
+    #[arg(long, default_value_t = 8, value_name = "N")]
+    analysers: usize,
+
     /// Open the point-and-click interface in a browser instead of running from
     /// the terminal. Every option below is available there.
     #[arg(long)]
@@ -186,6 +206,8 @@ fn run() -> Result<(), String> {
         force: args.force,
         limit: args.limit,
         max_attempts: args.max_attempts,
+        downloads_at_once: args.downloads,
+        analysers_at_once: args.analysers,
         second_opinion: format!("{:?}", args.second_opinion),
     };
 

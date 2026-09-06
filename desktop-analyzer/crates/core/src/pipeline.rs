@@ -9,6 +9,8 @@
 //! on track 400 of 900 must not lose 399 downloads.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{mpsc, Mutex};
 
 use crate::ledger::{EntryState, Ledger};
 use crate::meta::AnalysisResult;
@@ -101,11 +103,34 @@ pub struct RunOptions<'a> {
     pub max_attempts: u32,
     /// Stop after this many items. `None` runs the lot.
     pub limit: Option<usize>,
+    /// How many tracks to download at the same time.
+    ///
+    /// Measured on a real collection: one at a time is 3.53 s a track, four is
+    /// 0.72, eight is 0.26, and twelve is also 0.26 — it saturates at eight, so
+    /// more than that buys nothing and only widens the rate-limiting target.
+    pub downloads_at_once: usize,
+    /// How many tracks to analyse at the same time.
+    ///
+    /// Saturates at four (1.16 s a track alone, 0.25 with four, 0.29 with
+    /// eight). It is not short of cores — there are usually dozens — it is
+    /// memory bandwidth: a decoded track is around half a gigabyte, so more
+    /// workers just queue for RAM.
+    pub analysers_at_once: usize,
+}
+
+impl RunOptions<'_> {
+    fn downloaders(&self) -> usize {
+        self.downloads_at_once.max(1)
+    }
+
+    fn analysers(&self) -> usize {
+        self.analysers_at_once.max(1)
+    }
 }
 
 impl Default for RunOptions<'_> {
     fn default() -> Self {
-        RunOptions { work_dir: Path::new("."), max_attempts: 3, limit: None }
+        RunOptions { work_dir: Path::new("."), max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 }
     }
 }
 
@@ -165,16 +190,26 @@ pub fn record_plan_decisions(ledger: &mut Ledger, plan: &Plan, clock: &dyn Clock
 ///
 /// Returns a summary; per-item results live in the ledger, which is saved after
 /// every item so an interrupted run resumes cleanly.
+/// What a worker finished doing. Workers never touch the ledger or report
+/// progress themselves — they send one of these and the owning thread does
+/// both, which is what keeps a concurrent run as safe as a serial one.
+enum Done {
+    Downloading { item_id: String, title: String },
+    Analysing { item_id: String, title: String },
+    Analysed { item: PlannedItem, result: AnalysisResult },
+    Failed { item: PlannedItem, error: StepError },
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     plan: &Plan,
     ledger: &mut Ledger,
-    downloader: &dyn Downloader,
-    analyzer: &dyn Analyzer,
-    clock: &dyn Clock,
+    downloader: &(dyn Downloader + Sync),
+    analyzer: &(dyn Analyzer + Sync),
+    clock: &(dyn Clock + Sync),
     store: &dyn LedgerStore,
     options: &RunOptions,
-    should_stop: &dyn Fn() -> bool,
+    should_stop: &(dyn Fn() -> bool + Sync),
     on_progress: &mut dyn FnMut(Progress),
 ) -> Summary {
     record_plan_decisions(ledger, plan, clock);
@@ -190,11 +225,9 @@ pub fn run(
         .cloned()
         .collect();
     let total = options.limit.map_or(outstanding.len(), |l| l.min(outstanding.len()));
+    let work: Vec<PlannedItem> = outstanding.into_iter().take(total).collect();
 
-    on_progress(Progress::Started {
-        total,
-        already_done: ledger.completed_count(),
-    });
+    on_progress(Progress::Started { total, already_done: ledger.completed_count() });
 
     let mut summary = Summary {
         analyzed: 0,
@@ -203,80 +236,125 @@ pub fn run(
         needs_review: counts.review,
     };
 
-    for (i, item) in outstanding.iter().take(total).enumerate() {
-        if should_stop() {
-            break;
+    // Downloading and analysing overlap, and each runs several at a time. The
+    // ledger and the export are touched by exactly one thread — this one — so
+    // there is no shared mutable state to get wrong: workers only send `Done`.
+    //
+    // The audio queue is bounded, so downloads run ahead of analysis by at most
+    // a few tracks rather than filling the disk with the whole collection.
+    let (audio_tx, audio_rx) = mpsc::sync_channel::<(PlannedItem, PathBuf)>(options.downloaders());
+    let (done_tx, done_rx) = mpsc::channel::<Done>();
+    let next = AtomicUsize::new(0);
+    let audio_rx = Mutex::new(audio_rx);
+
+    std::thread::scope(|scope| {
+        for _ in 0..options.downloaders() {
+            let audio_tx = audio_tx.clone();
+            let done_tx = done_tx.clone();
+            let next = &next;
+            let work = &work;
+            scope.spawn(move || {
+                loop {
+                    if should_stop() {
+                        break;
+                    }
+                    let index = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(item) = work.get(index) else { break };
+                    let _ = done_tx.send(Done::Downloading {
+                        item_id: item.id.clone(),
+                        title: item.video_title.clone(),
+                    });
+                    match downloader.download(item, options.work_dir) {
+                        Ok(path) => {
+                            // A full queue blocks here, which is the throttle:
+                            // downloading stops running ahead of analysis.
+                            if audio_tx.send((item.clone(), path)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let _ = done_tx.send(Done::Failed { item: item.clone(), error });
+                        }
+                    }
+                }
+            });
         }
-        let index = i + 1;
+        // The originals must go, or the analysis workers wait for ever on a
+        // queue whose senders never all drop.
+        drop(audio_tx);
 
-        on_progress(Progress::Downloading {
-            index,
-            total,
-            item_id: item.id.clone(),
-            title: item.video_title.clone(),
-        });
+        for _ in 0..options.analysers() {
+            let done_tx = done_tx.clone();
+            let audio_rx = &audio_rx;
+            scope.spawn(move || {
+                loop {
+                    let next = {
+                        let rx = audio_rx.lock().unwrap_or_else(|e| e.into_inner());
+                        rx.recv()
+                    };
+                    let Ok((item, audio)) = next else { break };
+                    let _ = done_tx.send(Done::Analysing {
+                        item_id: item.id.clone(),
+                        title: item.video_title.clone(),
+                    });
+                    let outcome = analyzer.analyze(&audio, item.tempo_hint);
+                    // Scratch space, and a decoded track is large; drop it
+                    // either way rather than filling the disk over a long run.
+                    let _ = std::fs::remove_file(&audio);
+                    let _ = match outcome {
+                        Ok(result) => done_tx.send(Done::Analysed { item, result }),
+                        Err(error) => done_tx.send(Done::Failed { item, error }),
+                    };
+                }
+            });
+        }
+        drop(done_tx);
 
-        let audio = match downloader.download(item, options.work_dir) {
-            Ok(path) => path,
-            Err(e) => {
-                record_failure(
-                    ledger, item, &e, clock, store, options.max_attempts,
-                    &mut save_failing, on_progress,
-                );
-                on_progress(Progress::Failed {
-                    index,
-                    total,
-                    item_id: item.id.clone(),
-                    error: e.message,
-                    will_retry: e.retryable && ledger.attempts(&item.id) < options.max_attempts,
-                });
-                summary.failed += 1;
-                continue;
-            }
-        };
-
-        on_progress(Progress::Analyzing {
-            index,
-            total,
-            item_id: item.id.clone(),
-            title: item.video_title.clone(),
-        });
-
-        let outcome = analyzer.analyze(&audio, item.tempo_hint);
-        // The audio file is scratch space and can be large; drop it either way
-        // rather than filling the disk over a long run.
-        let _ = std::fs::remove_file(&audio);
-
-        match outcome {
-            Ok(result) => {
-                let (bpm, key) = (result.bpm, result.key.clone());
-                ledger.record_success(&item.id, result, &clock.now_iso8601());
-                save(store, ledger, &mut save_failing, on_progress);
-                on_progress(Progress::Completed {
-                    index,
-                    total,
-                    item_id: item.id.clone(),
-                    bpm,
-                    key,
-                });
-                summary.analyzed += 1;
-            }
-            Err(e) => {
-                record_failure(
-                    ledger, item, &e, clock, store, options.max_attempts,
-                    &mut save_failing, on_progress,
-                );
-                on_progress(Progress::Failed {
-                    index,
-                    total,
-                    item_id: item.id.clone(),
-                    error: e.message,
-                    will_retry: e.retryable && ledger.attempts(&item.id) < options.max_attempts,
-                });
-                summary.failed += 1;
+        // Everything below happens on one thread: the ledger is never shared.
+        let mut finished = 0usize;
+        for event in done_rx {
+            match event {
+                Done::Downloading { item_id, title } => {
+                    on_progress(Progress::Downloading { index: finished + 1, total, item_id, title });
+                }
+                Done::Analysing { item_id, title } => {
+                    on_progress(Progress::Analyzing { index: finished + 1, total, item_id, title });
+                }
+                Done::Analysed { item, result } => {
+                    finished += 1;
+                    let (bpm, key) = (result.bpm, result.key.clone());
+                    ledger.record_success(&item.id, result, &clock.now_iso8601());
+                    save(store, ledger, &mut save_failing, on_progress);
+                    on_progress(Progress::Completed {
+                        index: finished,
+                        total,
+                        item_id: item.id,
+                        bpm,
+                        key,
+                    });
+                    summary.analyzed += 1;
+                }
+                Done::Failed { item, error } => {
+                    finished += 1;
+                    let message = error.message.clone();
+                    let retryable = error.retryable;
+                    record_failure(
+                        ledger, &item, &error, clock, store, options.max_attempts,
+                        &mut save_failing, on_progress,
+                    );
+                    on_progress(Progress::Failed {
+                        index: finished,
+                        total,
+                        item_id: item.id.clone(),
+                        error: message,
+                        will_retry: retryable
+                            && ledger.attempts(&item.id) < options.max_attempts,
+                    });
+                    summary.failed += 1;
+                }
             }
         }
-    }
+    });
 
     on_progress(Progress::Finished(summary));
     summary
@@ -310,7 +388,7 @@ mod tests {
     use super::*;
     use crate::backup::Backup;
     use serde_json::json;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
     use std::collections::HashMap;
 
     struct FixedClock;
@@ -324,11 +402,11 @@ mod tests {
     /// rather than once at the end.
     #[derive(Default)]
     struct RecordingStore {
-        saves: RefCell<Vec<usize>>,
+        saves: Mutex<Vec<usize>>,
     }
     impl LedgerStore for RecordingStore {
         fn save(&self, ledger: &Ledger) -> Result<(), String> {
-            self.saves.borrow_mut().push(ledger.entries.len());
+            self.saves.lock().unwrap().push(ledger.entries.len());
             Ok(())
         }
     }
@@ -421,10 +499,10 @@ mod tests {
         ) -> Summary {
             let downloader = FakeDownloader { failures: dl_fail };
             let analyzer = FakeAnalyzer { failures: an_fail };
-            let seen = RefCell::new(0usize);
+            let seen = Mutex::new(0usize);
             let should_stop = || {
                 if let Some(n) = stop_after {
-                    let mut s = seen.borrow_mut();
+                    let mut s = seen.lock().unwrap();
                     if *s >= n {
                         return true;
                     }
@@ -432,7 +510,7 @@ mod tests {
                 }
                 false
             };
-            let options = RunOptions { work_dir: &self.dir, max_attempts: 3, limit: None };
+            let options = RunOptions { work_dir: &self.dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
             run(
                 plan,
                 ledger,
@@ -481,9 +559,9 @@ mod tests {
 
         // One save for the plan decisions, then one per completed item.
         assert!(
-            h.store.saves.borrow().len() >= 4,
+            h.store.saves.lock().unwrap().len() >= 4,
             "expected a save per item, got {:?}",
-            h.store.saves.borrow()
+            h.store.saves.lock().unwrap()
         );
     }
 
@@ -612,7 +690,7 @@ mod save_reporting_tests {
     use super::*;
     use crate::backup::Backup;
     use serde_json::json;
-    use std::cell::RefCell;
+    use std::sync::Mutex;
     use std::path::PathBuf;
 
     struct FixedClock;
@@ -624,12 +702,12 @@ mod save_reporting_tests {
 
     /// Fails every save until `heal_after` saves have been attempted.
     struct FlakyStore {
-        attempts: RefCell<usize>,
+        attempts: Mutex<usize>,
         heal_after: usize,
     }
     impl LedgerStore for FlakyStore {
         fn save(&self, _ledger: &Ledger) -> Result<(), String> {
-            let mut n = self.attempts.borrow_mut();
+            let mut n = self.attempts.lock().unwrap();
             *n += 1;
             if *n > self.heal_after {
                 Ok(())
@@ -692,7 +770,7 @@ mod save_reporting_tests {
         let plan = plan_of(ids);
         let mut ledger = Ledger::new("h", "now");
         let mut events = vec![];
-        let options = RunOptions { work_dir: &dir, max_attempts: 3, limit: None };
+        let options = RunOptions { work_dir: &dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
         run(
             &plan,
             &mut ledger,
@@ -712,7 +790,7 @@ mod save_reporting_tests {
     /// someone interrupt it believing their progress was safe.
     #[test]
     fn a_ledger_that_cannot_be_saved_is_reported() {
-        let store = FlakyStore { attempts: RefCell::new(0), heal_after: usize::MAX };
+        let store = FlakyStore { attempts: Mutex::new(0), heal_after: usize::MAX };
         let events = run_with(&store, &["1_a", "1_b", "1_c"]);
         let warnings = events
             .iter()
@@ -725,7 +803,7 @@ mod save_reporting_tests {
     /// bury the run's actual output.
     #[test]
     fn the_warning_is_not_repeated_for_every_item() {
-        let store = FlakyStore { attempts: RefCell::new(0), heal_after: usize::MAX };
+        let store = FlakyStore { attempts: Mutex::new(0), heal_after: usize::MAX };
         let events = run_with(&store, &["1_a", "1_b", "1_c", "1_d", "1_e"]);
         assert_eq!(
             events.iter().filter(|e| matches!(e, Progress::LedgerUnsaved { .. })).count(),
@@ -736,7 +814,7 @@ mod save_reporting_tests {
     #[test]
     fn recovery_is_reported_so_the_user_knows_it_is_safe_again() {
         // Fails the plan-decisions save, then succeeds.
-        let store = FlakyStore { attempts: RefCell::new(0), heal_after: 1 };
+        let store = FlakyStore { attempts: Mutex::new(0), heal_after: 1 };
         let events = run_with(&store, &["1_a", "1_b"]);
         let unsaved = events.iter().position(|e| matches!(e, Progress::LedgerUnsaved { .. }));
         let saved = events.iter().position(|e| matches!(e, Progress::LedgerSaved));

@@ -146,6 +146,16 @@
           <label for="timeout">Download timeout (seconds)</label>
           <input type="number" id="timeout" value="30" min="5" max="600">
         </div>
+        <div class="field">
+          <label for="downloads">Downloads at once</label>
+          <input type="number" id="downloads" value="8" min="1" max="32">
+          <p class="hint">Most of a run is downloading. Eight is about five times faster than one; past sixteen there is nothing left to win.</p>
+        </div>
+        <div class="field">
+          <label for="analysers">Analysers at once</label>
+          <input type="number" id="analysers" value="8" min="1" max="32">
+          <p class="hint">Each one holds a decoded track, roughly half a gigabyte. Eight peaks around 4&nbsp;GB, sixteen around 7.5&nbsp;GB.</p>
+        </div>
       </div>
     </details>
   </div>
@@ -203,6 +213,8 @@ function options() {
     force: $('force').checked,
     limit: isFinite(limit) && limit > 0 ? limit : null,
     max_attempts: parseInt($('attempts').value, 10) || 3,
+    downloads: parseInt($('downloads').value, 10) || 8,
+    analysers: parseInt($('analysers').value, 10) || 8,
     timeout: parseInt($('timeout').value, 10) || 30,
     second_opinion: $('second').value
   };

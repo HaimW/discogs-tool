@@ -7,7 +7,7 @@
 //! file back with `FileLedgerStore` the way a restarted process would, and
 //! checks that nothing is redone and nothing is lost.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -43,12 +43,12 @@ impl Drop for TempDir {
 /// detected across the two runs.
 #[derive(Default)]
 struct SpyDownloader {
-    seen: RefCell<Vec<String>>,
+    seen: Mutex<Vec<String>>,
 }
 
 impl Downloader for SpyDownloader {
     fn download(&self, item: &PlannedItem, dest: &Path) -> Result<PathBuf, StepError> {
-        self.seen.borrow_mut().push(item.id.clone());
+        self.seen.lock().unwrap().push(item.id.clone());
         let path = dest.join(format!("{}.m4a", item.id));
         fs::write(&path, b"audio").map_err(|e| StepError::retryable(e.to_string()))?;
         Ok(path)
@@ -108,11 +108,11 @@ fn run_until(
     work_dir: &Path,
     stop_after: Option<usize>,
 ) -> pipeline::Summary {
-    let started = RefCell::new(0usize);
+    let started = Mutex::new(0usize);
     let should_stop = || match stop_after {
         None => false,
         Some(n) => {
-            let mut s = started.borrow_mut();
+            let mut s = started.lock().unwrap();
             if *s >= n {
                 true
             } else {
@@ -121,7 +121,7 @@ fn run_until(
             }
         }
     };
-    let options = RunOptions { work_dir, max_attempts: 3, limit: None };
+    let options = RunOptions { work_dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
     pipeline::run(
         plan,
         ledger,
@@ -162,8 +162,8 @@ fn a_run_interrupted_halfway_resumes_from_the_ledger_on_disk() {
     assert_eq!(second.analyzed, 4, "only the outstanding four are done");
 
     // Nothing was downloaded twice, across either run.
-    let first_ids: HashSet<String> = first_downloader.seen.borrow().iter().cloned().collect();
-    let second_ids: HashSet<String> = second_downloader.seen.borrow().iter().cloned().collect();
+    let first_ids: HashSet<String> = first_downloader.seen.lock().unwrap().iter().cloned().collect();
+    let second_ids: HashSet<String> = second_downloader.seen.lock().unwrap().iter().cloned().collect();
     assert_eq!(first_ids.len(), 2);
     assert_eq!(second_ids.len(), 4);
     assert!(
@@ -188,7 +188,7 @@ fn a_run_interrupted_halfway_resumes_from_the_ledger_on_disk() {
     let mut ledger = Ledger::parse(&store.load().unwrap()).unwrap();
     let third = run_until(&plan, &mut ledger, &third_downloader, &store, &work, None);
     assert_eq!(third.analyzed, 0);
-    assert!(third_downloader.seen.borrow().is_empty(), "a finished item was redone");
+    assert!(third_downloader.seen.lock().unwrap().is_empty(), "a finished item was redone");
 }
 
 #[test]
@@ -203,13 +203,14 @@ fn the_ledger_is_on_disk_before_the_run_ends() {
     let mut ledger = Ledger::new("hash", "start");
     let downloader = SpyDownloader::default();
 
-    let options = RunOptions { work_dir: &work, max_attempts: 3, limit: None };
-    let mut on_disk_at_item_three = 0usize;
-    let seen = RefCell::new(0usize);
-    let should_stop = || {
-        *seen.borrow_mut() += 1;
-        false
-    };
+    let options = RunOptions { work_dir: &work, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
+    // Phrased against completions rather than downloads, because downloading
+    // runs ahead of analysis: by the time the third track is being fetched the
+    // first may not have been analysed yet. The guarantee that matters is that
+    // a finished result is on disk before it is announced, so an interruption
+    // never loses work that was reported as done.
+    let on_disk_when_announced = Mutex::new(Vec::new());
+    let should_stop = || false;
     pipeline::run(
         &plan,
         &mut ledger,
@@ -220,17 +221,22 @@ fn the_ledger_is_on_disk_before_the_run_ends() {
         &options,
         &should_stop,
         &mut |p: Progress| {
-            if let Progress::Downloading { index: 3, .. } = p {
-                let raw = store.load().expect("a ledger exists by item three");
-                on_disk_at_item_three = Ledger::parse(&raw).unwrap().completed_count();
+            if let Progress::Completed { index, .. } = p {
+                let raw = store.load().expect("a ledger exists once something has finished");
+                let durable = Ledger::parse(&raw).unwrap().completed_count();
+                on_disk_when_announced.lock().unwrap().push((index, durable));
             }
         },
     );
 
-    assert_eq!(
-        on_disk_at_item_three, 2,
-        "the first two results should already be durable when the third starts"
-    );
+    let announced = on_disk_when_announced.lock().unwrap();
+    assert_eq!(announced.len(), 4, "every track should have completed");
+    for (index, durable) in announced.iter() {
+        assert!(
+            durable >= index,
+            "{index} results were announced as done but only {durable} were on disk"
+        );
+    }
 }
 
 #[test]

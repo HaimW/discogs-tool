@@ -14,13 +14,13 @@ use analyzer_core::tempo::{SecondOpinion, TempoHint};
 
 /// Runs the real detectors over a downloaded file.
 pub struct FileAnalyzer<'a> {
-    clock: &'a dyn Clock,
+    clock: &'a (dyn Clock + Sync),
     version: String,
     second_opinion: SecondOpinion,
 }
 
 impl<'a> FileAnalyzer<'a> {
-    pub fn new(clock: &'a dyn Clock, version: impl Into<String>) -> FileAnalyzer<'a> {
+    pub fn new(clock: &'a (dyn Clock + Sync), version: impl Into<String>) -> FileAnalyzer<'a> {
         FileAnalyzer { clock, version: version.into(), second_opinion: SecondOpinion::default() }
     }
 

@@ -174,6 +174,8 @@ fn options_from(body: &serde_json::Value) -> Result<Options, String> {
         force: body["force"].as_bool().unwrap_or(false),
         limit: body["limit"].as_u64().map(|n| n as usize).filter(|n| *n > 0),
         max_attempts: body["max_attempts"].as_u64().unwrap_or(3) as u32,
+        downloads_at_once: body["downloads"].as_u64().unwrap_or(8).clamp(1, 32) as usize,
+        analysers_at_once: body["analysers"].as_u64().unwrap_or(8).clamp(1, 32) as usize,
         second_opinion: second_opinion.to_string(),
     })
 }
