@@ -25,6 +25,40 @@
 //! The `Host` header is checked too, so a name that resolves to 127.0.0.1
 //! cannot be used to make a page look same-origin (DNS rebinding).
 
+/// The spellings of loopback a browser treats as different origins.
+///
+/// `http://localhost:8080` and `http://127.0.0.1:8080` are the same server and
+/// different origins, and which one you get depends on what you typed. Allowing
+/// one and refusing the other is a trap with no security value: a page can only
+/// carry a loopback origin if it was served from loopback on that same port, so
+/// naming one spelling has already trusted whatever is listening there.
+///
+/// Other ports are *not* expanded — that would trust every local server.
+const LOOPBACK_HOSTS: [&str; 3] = ["127.0.0.1", "localhost", "[::1]"];
+
+/// Expand a loopback origin to the other spellings of the same address and
+/// port. Anything else is returned unchanged.
+fn loopback_aliases(origin: String) -> Vec<String> {
+    let Some((scheme, rest)) = origin.split_once("://") else {
+        return vec![origin];
+    };
+    let (host, port) = match rest.rsplit_once(':') {
+        // Keep the bracket on an IPv6 literal: "[::1]" splits at the last colon.
+        Some((h, p)) if p.chars().all(|c| c.is_ascii_digit()) && !p.is_empty() => (h, Some(p)),
+        _ => (rest, None),
+    };
+    if !LOOPBACK_HOSTS.contains(&host) {
+        return vec![origin];
+    }
+    LOOPBACK_HOSTS
+        .iter()
+        .map(|alias| match port {
+            Some(p) => format!("{scheme}://{alias}:{p}"),
+            None => format!("{scheme}://{alias}"),
+        })
+        .collect()
+}
+
 /// Origins allowed to drive this server, beyond its own.
 #[derive(Debug, Clone, Default)]
 pub struct Allowed {
@@ -37,7 +71,10 @@ pub struct Allowed {
 impl Allowed {
     pub fn new(port: u16, extra: Vec<String>) -> Allowed {
         Allowed {
-            extra: extra.into_iter().map(|o| o.trim_end_matches('/').to_lowercase()).collect(),
+            extra: extra
+                .into_iter()
+                .flat_map(|o| loopback_aliases(o.trim_end_matches('/').to_lowercase()))
+                .collect(),
             own: vec![
                 format!("http://127.0.0.1:{port}"),
                 format!("http://localhost:{port}"),
@@ -98,6 +135,36 @@ mod tests {
         assert!(allowed().permits(Some("https://haimw.github.io")));
         // A trailing slash is the same origin.
         assert!(allowed().permits(Some("https://haimw.github.io/")));
+    }
+
+    #[test]
+    fn the_other_spelling_of_loopback_is_the_same_server() {
+        // localhost and 127.0.0.1 are one server and two origins, and which you
+        // get depends on what you typed into the address bar. Naming either is
+        // naming both.
+        let local = Allowed::new(8733, vec!["http://127.0.0.1:8080".into()]);
+        assert!(local.permits(Some("http://127.0.0.1:8080")));
+        assert!(local.permits(Some("http://localhost:8080")));
+        assert!(local.permits(Some("http://[::1]:8080")));
+
+        let named = Allowed::new(8733, vec!["http://localhost:8080".into()]);
+        assert!(named.permits(Some("http://127.0.0.1:8080")));
+    }
+
+    #[test]
+    fn expanding_one_port_does_not_trust_another() {
+        // The expansion is per address, not a blanket trust of loopback: some
+        // other local server must not inherit this.
+        let local = Allowed::new(8733, vec!["http://127.0.0.1:8080".into()]);
+        assert!(!local.permits(Some("http://localhost:9999")));
+        assert!(!local.permits(Some("http://127.0.0.1:3000")));
+    }
+
+    #[test]
+    fn a_remote_origin_is_not_expanded() {
+        let remote = Allowed::new(8733, vec!["https://haimw.github.io".into()]);
+        assert!(remote.permits(Some("https://haimw.github.io")));
+        assert!(!remote.permits(Some("http://localhost")));
     }
 
     #[test]
