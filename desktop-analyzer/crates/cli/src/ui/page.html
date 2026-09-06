@@ -146,18 +146,26 @@
           <label for="timeout">Download timeout (seconds)</label>
           <input type="number" id="timeout" value="30" min="5" max="600">
         </div>
-        <div class="field">
-          <label for="downloads">Downloads at once</label>
-          <input type="number" id="downloads" value="8" min="1" max="32">
-          <p class="hint">Most of a run is downloading. Eight is about five times faster than one; past sixteen there is nothing left to win.</p>
-        </div>
-        <div class="field">
-          <label for="analysers">Analysers at once</label>
-          <input type="number" id="analysers" value="8" min="1" max="32">
-          <p class="hint">Each one holds a decoded track, roughly half a gigabyte. Eight peaks around 4&nbsp;GB, sixteen around 7.5&nbsp;GB.</p>
-        </div>
+
       </div>
     </details>
+  </div>
+
+  <div class="card">
+    <h2>Speed</h2>
+    <div class="row">
+      <div class="field">
+        <label for="downloads">Downloads at once</label>
+        <input type="number" id="downloads" value="8" min="1" max="32">
+        <p class="hint">Most of a run is spent downloading, and it parallelises well.</p>
+      </div>
+      <div class="field">
+        <label for="analysers">Analysers at once</label>
+        <input type="number" id="analysers" value="8" min="1" max="32">
+        <p class="hint">Each holds a decoded track — about half a gigabyte. This is the one that can run you out of memory.</p>
+      </div>
+    </div>
+    <p class="hint" id="speedNote"></p>
   </div>
 
   <div class="card">
@@ -271,6 +279,36 @@ $('oracleBtn').addEventListener('click', function () {
     count: parseInt($('oracleCount').value, 10) || 200
   }).then(function (r) { if (r.error) banner(r.error, true); });
 });
+
+// Measured on a real collection: 7.84 s a track with one of each, 1.52 at
+// eight and eight, 0.97 at sixteen. Interpolating between those is honest
+// enough for a "roughly how long" line, and far better than no signal at all.
+function estimate() {
+  var d = parseInt($('downloads').value, 10) || 1;
+  var a = parseInt($('analysers').value, 10) || 1;
+  var points = [[1, 7.84], [8, 1.52], [16, 0.97], [24, 0.96]];
+  var n = Math.min(d, a);
+  var per = points[points.length - 1][1];
+  for (var i = 0; i < points.length - 1; i++) {
+    if (n <= points[i + 1][0]) {
+      var lo = points[i], hi = points[i + 1];
+      per = lo[1] + (hi[1] - lo[1]) * (n - lo[0]) / (hi[0] - lo[0]);
+      break;
+    }
+  }
+  var limit = parseInt($('limit').value, 10);
+  var tracks = isFinite(limit) && limit > 0 ? limit : 3000;
+  var minutes = per * tracks / 60;
+  var time = minutes < 90 ? Math.round(minutes) + ' minutes'
+                          : (minutes / 60).toFixed(1) + ' hours';
+  $('speedNote').textContent =
+    'About ' + time + ' for ' + (tracks === 3000 ? 'a 3,000-track collection' : tracks + ' tracks') +
+    ', and roughly ' + (a * 0.5).toFixed(1) + ' GB of memory at peak.';
+}
+['downloads', 'analysers', 'limit'].forEach(function (id) {
+  $(id).addEventListener('input', estimate);
+});
+estimate();
 
 // The log is only redrawn when it changes, so a three-hour run does not fight
 // the browser for the scrollbar every second.
