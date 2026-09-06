@@ -20,7 +20,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use analyzer_core::pipeline::{Downloader, StepError};
+use analyzer_core::pipeline::{audio_stem, Downloader, StepError};
 use analyzer_core::plan::PlannedItem;
 
 /// yt-dlp format selector, in preference order:
@@ -115,7 +115,7 @@ impl YtDlp {
 
 impl Downloader for YtDlp {
     fn download(&self, item: &PlannedItem, dest_dir: &Path) -> Result<PathBuf, StepError> {
-        let template = dest_dir.join(format!("{}.%(ext)s", sanitize(&item.id)));
+        let template = dest_dir.join(format!("{}.%(ext)s", audio_stem(&item.id)));
 
         let mut command = Command::new(&self.binary);
         command
@@ -247,12 +247,6 @@ fn first_error_line(stderr: &str) -> String {
 
 /// Ids come from Discogs data, so keep them to characters that are safe in a
 /// filename on every platform.
-fn sanitize(id: &str) -> String {
-    id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,13 +322,6 @@ mod tests {
     fn a_silent_failure_still_produces_a_message() {
         assert_eq!(classify("").message, "yt-dlp failed without a message");
         assert!(classify("").retryable);
-    }
-
-    #[test]
-    fn ids_are_reduced_to_safe_filenames() {
-        assert_eq!(sanitize("12345_dQw4w9WgXcQ"), "12345_dQw4w9WgXcQ");
-        assert_eq!(sanitize("../../etc/passwd"), "______etc_passwd");
-        assert_eq!(sanitize("a b:c*d"), "a_b_c_d");
     }
 
     #[test]

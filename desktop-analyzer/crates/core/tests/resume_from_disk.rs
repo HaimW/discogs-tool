@@ -121,7 +121,7 @@ fn run_until(
             }
         }
     };
-    let options = RunOptions { work_dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
+    let options = RunOptions { work_dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1, keep_audio: false };
     pipeline::run(
         plan,
         ledger,
@@ -203,7 +203,7 @@ fn the_ledger_is_on_disk_before_the_run_ends() {
     let mut ledger = Ledger::new("hash", "start");
     let downloader = SpyDownloader::default();
 
-    let options = RunOptions { work_dir: &work, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
+    let options = RunOptions { work_dir: &work, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1, keep_audio: false };
     // Phrased against completions rather than downloads, because downloading
     // runs ahead of analysis: by the time the third track is being fetched the
     // first may not have been analysed yet. The guarantee that matters is that

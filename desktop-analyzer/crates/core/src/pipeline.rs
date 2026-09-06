@@ -22,6 +22,43 @@ pub trait Downloader {
     fn download(&self, item: &PlannedItem, dest_dir: &Path) -> Result<PathBuf, StepError>;
 }
 
+/// The filename, without extension, that an item's audio is stored under.
+///
+/// Lives here rather than in the downloader because two things now depend on
+/// agreeing about it: the downloader writing the file, and `--keep-audio`
+/// looking for it again on a later run. If they disagreed, reuse would silently
+/// never fire and every run would re-download.
+pub fn audio_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect()
+}
+
+/// An already-downloaded file for this item, if `dir` holds one.
+///
+/// The extension is whatever yt-dlp picked, so the stem is matched and the
+/// extension ignored. Empty files are rejected: a run killed mid-download
+/// leaves one behind, and handing that to the analyser would turn a resumable
+/// interruption into a permanent failure.
+fn existing_audio(dir: &Path, id: &str) -> Option<PathBuf> {
+    let stem = audio_stem(id);
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.file_stem().and_then(|s| s.to_str()) != Some(stem.as_str()) {
+            continue;
+        }
+        if entry.metadata().is_ok_and(|m| m.is_file() && m.len() > 0) {
+            // Deterministic if a stale file from another format is lying
+            // around, so a rerun behaves the same way twice.
+            if found.as_ref().is_none_or(|best| path < *best) {
+                found = Some(path);
+            }
+        }
+    }
+    found
+}
+
 /// Analyses one audio file.
 pub trait Analyzer {
     /// `hint` is what the release's Discogs styles say about reading this
@@ -89,6 +126,10 @@ impl std::fmt::Display for StepError {
 pub enum Progress {
     Started { total: usize, already_done: usize },
     Downloading { index: usize, total: usize, item_id: String, title: String },
+    /// `--keep-audio` found this track's file already on disk, so nothing was
+    /// downloaded. Reported separately from `Downloading` because saying
+    /// "downloading" when no network call happened would misreport the run.
+    Reusing { index: usize, total: usize, item_id: String, title: String },
     Analyzing { index: usize, total: usize, item_id: String, title: String },
     Completed { index: usize, total: usize, item_id: String, bpm: f64, key: String },
     Failed { index: usize, total: usize, item_id: String, error: String, will_retry: bool },
@@ -136,6 +177,13 @@ pub struct RunOptions<'a> {
     /// memory bandwidth: a decoded track is around half a gigabyte, so more
     /// workers just queue for RAM.
     pub analysers_at_once: usize,
+    /// Keep downloaded audio in `work_dir` instead of deleting it after
+    /// analysis, and reuse it on later runs.
+    ///
+    /// Off by default because a decoded collection is enormous. On, it makes
+    /// iterating on detection cheap: the second run needs no yt-dlp, no
+    /// network, and cannot be rate-limited or bot-checked.
+    pub keep_audio: bool,
 }
 
 impl RunOptions<'_> {
@@ -150,7 +198,14 @@ impl RunOptions<'_> {
 
 impl Default for RunOptions<'_> {
     fn default() -> Self {
-        RunOptions { work_dir: Path::new("."), max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 }
+        RunOptions {
+            work_dir: Path::new("."),
+            max_attempts: 3,
+            limit: None,
+            downloads_at_once: 1,
+            analysers_at_once: 1,
+            keep_audio: false,
+        }
     }
 }
 
@@ -219,6 +274,7 @@ const BLOCKED_BEFORE_GIVING_UP: usize = 8;
 /// both, which is what keeps a concurrent run as safe as a serial one.
 enum Done {
     Downloading { item_id: String, title: String },
+    Reusing { item_id: String, title: String },
     Analysing { item_id: String, title: String },
     Analysed { item: PlannedItem, result: AnalysisResult },
     Failed { item: PlannedItem, error: StepError },
@@ -284,6 +340,7 @@ pub fn run(
             let next = &next;
             let work = &work;
             let blocked = &stop_because_blocked;
+            let keep_audio = options.keep_audio;
             scope.spawn(move || {
                 loop {
                     if should_stop() || blocked.load(Ordering::SeqCst) {
@@ -291,11 +348,29 @@ pub fn run(
                     }
                     let index = next.fetch_add(1, Ordering::SeqCst);
                     let Some(item) = work.get(index) else { break };
-                    let _ = done_tx.send(Done::Downloading {
-                        item_id: item.id.clone(),
-                        title: item.video_title.clone(),
-                    });
-                    match downloader.download(item, options.work_dir) {
+                    // Reuse comes before the download so a rerun makes no
+                    // network call at all — that is the whole point of the
+                    // flag, and it is what makes a rerun immune to rate limits.
+                    let cached = keep_audio
+                        .then(|| existing_audio(options.work_dir, &item.id))
+                        .flatten();
+                    let fetched = match cached {
+                        Some(path) => {
+                            let _ = done_tx.send(Done::Reusing {
+                                item_id: item.id.clone(),
+                                title: item.video_title.clone(),
+                            });
+                            Ok(path)
+                        }
+                        None => {
+                            let _ = done_tx.send(Done::Downloading {
+                                item_id: item.id.clone(),
+                                title: item.video_title.clone(),
+                            });
+                            downloader.download(item, options.work_dir)
+                        }
+                    };
+                    match fetched {
                         Ok(path) => {
                             // A full queue blocks here, which is the throttle:
                             // downloading stops running ahead of analysis.
@@ -317,6 +392,7 @@ pub fn run(
         for _ in 0..options.analysers() {
             let done_tx = done_tx.clone();
             let audio_rx = &audio_rx;
+            let keep_audio = options.keep_audio;
             scope.spawn(move || {
                 loop {
                     let next = {
@@ -331,7 +407,11 @@ pub fn run(
                     let outcome = analyzer.analyze(&audio, item.tempo_hint);
                     // Scratch space, and a decoded track is large; drop it
                     // either way rather than filling the disk over a long run.
-                    let _ = std::fs::remove_file(&audio);
+                    // Unless the run asked to keep it — then it is not scratch,
+                    // it is the corpus for the next run.
+                    if !keep_audio {
+                        let _ = std::fs::remove_file(&audio);
+                    }
                     let _ = match outcome {
                         Ok(result) => done_tx.send(Done::Analysed { item, result }),
                         Err(error) => done_tx.send(Done::Failed { item, error }),
@@ -347,6 +427,9 @@ pub fn run(
             match event {
                 Done::Downloading { item_id, title } => {
                     on_progress(Progress::Downloading { index: finished + 1, total, item_id, title });
+                }
+                Done::Reusing { item_id, title } => {
+                    on_progress(Progress::Reusing { index: finished + 1, total, item_id, title });
                 }
                 Done::Analysing { item_id, title } => {
                     on_progress(Progress::Analyzing { index: finished + 1, total, item_id, title });
@@ -427,6 +510,37 @@ fn record_failure(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ids_are_reduced_to_safe_filenames() {
+        assert_eq!(audio_stem("12345_dQw4w9WgXcQ"), "12345_dQw4w9WgXcQ");
+        // A traversal attempt in an id must not escape the work dir.
+        assert_eq!(audio_stem("../../etc/passwd"), "______etc_passwd");
+        assert_eq!(audio_stem("a b:c*d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn a_cached_file_is_found_whatever_extension_it_has() {
+        let dir = std::env::temp_dir().join(format!("stem-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("7_abc.opus"), b"audio").unwrap();
+
+        assert_eq!(existing_audio(&dir, "7_abc"), Some(dir.join("7_abc.opus")));
+        assert_eq!(existing_audio(&dir, "7_xyz"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_half_written_file_is_not_reused() {
+        // A run killed mid-download leaves an empty file. Handing that to the
+        // analyser would turn a resumable interruption into a hard failure.
+        let dir = std::env::temp_dir().join(format!("stem-empty-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(dir.join("7_abc.opus"), b"").unwrap();
+
+        assert_eq!(existing_audio(&dir, "7_abc"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use super::*;
     use crate::backup::Backup;
     use serde_json::json;
@@ -552,7 +666,14 @@ mod tests {
                 }
                 false
             };
-            let options = RunOptions { work_dir: &self.dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
+            let options = RunOptions {
+                work_dir: &self.dir,
+                max_attempts: 3,
+                limit: None,
+                downloads_at_once: 1,
+                analysers_at_once: 1,
+                keep_audio: false,
+            };
             run(
                 plan,
                 ledger,
@@ -618,6 +739,61 @@ mod tests {
 
         let leftovers: Vec<_> = std::fs::read_dir(&h.dir).unwrap().filter_map(|e| e.ok()).collect();
         assert!(leftovers.is_empty(), "temp audio left behind: {leftovers:?}");
+    }
+
+    #[test]
+    fn keep_audio_keeps_the_files_and_a_rerun_downloads_nothing() {
+        // Counts downloads so the second run can be shown to make none — the
+        // whole point of the flag is that a rerun never touches the network.
+        struct Counting(Mutex<usize>);
+        impl Downloader for Counting {
+            fn download(&self, item: &PlannedItem, dest: &Path) -> Result<PathBuf, StepError> {
+                *self.0.lock().unwrap() += 1;
+                let path = dest.join(format!("{}.m4a", audio_stem(&item.id)));
+                std::fs::write(&path, b"audio").map_err(|e| StepError::retryable(e.to_string()))?;
+                Ok(path)
+            }
+        }
+
+        let h = Harness::new("keep-audio");
+        let plan = plan_of(&["1_a", "1_b"]);
+        let downloader = Counting(Mutex::new(0));
+        let analyzer = FakeAnalyzer { failures: HashMap::new() };
+        let options = RunOptions {
+            work_dir: &h.dir,
+            max_attempts: 3,
+            limit: None,
+            downloads_at_once: 1,
+            analysers_at_once: 1,
+            keep_audio: true,
+        };
+
+        let mut first = Ledger::new("h", "now");
+        let mut events = vec![];
+        run(
+            &plan, &mut first, &downloader, &analyzer, &FixedClock, &h.store,
+            &options, &|| false, &mut |p| events.push(p),
+        );
+
+        assert_eq!(*downloader.0.lock().unwrap(), 2, "both tracks download the first time");
+        let kept: Vec<_> = std::fs::read_dir(&h.dir).unwrap().filter_map(|e| e.ok()).collect();
+        assert_eq!(kept.len(), 2, "audio should have been kept: {kept:?}");
+
+        // A fresh ledger, so the work is outstanding again and the only thing
+        // that can stop a download is the cached file.
+        let mut second = Ledger::new("h", "now");
+        let mut events = vec![];
+        run(
+            &plan, &mut second, &downloader, &analyzer, &FixedClock, &h.store,
+            &options, &|| false, &mut |p| events.push(p),
+        );
+
+        assert_eq!(*downloader.0.lock().unwrap(), 2, "the rerun must not download");
+        assert!(
+            events.iter().any(|e| matches!(e, Progress::Reusing { .. })),
+            "the rerun should report reuse, not a download",
+        );
+        assert!(!events.iter().any(|e| matches!(e, Progress::Downloading { .. })));
     }
 
     #[test]
@@ -812,7 +988,14 @@ mod save_reporting_tests {
         let plan = plan_of(ids);
         let mut ledger = Ledger::new("h", "now");
         let mut events = vec![];
-        let options = RunOptions { work_dir: &dir, max_attempts: 3, limit: None, downloads_at_once: 1, analysers_at_once: 1 };
+        let options = RunOptions {
+            work_dir: &dir,
+            max_attempts: 3,
+            limit: None,
+            downloads_at_once: 1,
+            analysers_at_once: 1,
+            keep_audio: false,
+        };
         run(
             &plan,
             &mut ledger,

@@ -180,6 +180,7 @@ fn options_from(body: &serde_json::Value) -> Result<Options, String> {
         max_attempts: body["max_attempts"].as_u64().unwrap_or(3) as u32,
         downloads_at_once: body["downloads"].as_u64().unwrap_or(8).clamp(1, 32) as usize,
         analysers_at_once: body["analysers"].as_u64().unwrap_or(8).clamp(1, 32) as usize,
+        keep_audio: body["keep_audio"].as_bool().unwrap_or(false),
         second_opinion: second_opinion.to_string(),
     })
 }
@@ -273,6 +274,11 @@ fn report(state: &Arc<UiState>, event: Progress) {
             inner.done = index.saturating_sub(1);
             inner.total = total;
             inner.activity = format!("Downloading {title}");
+        }
+        Progress::Reusing { index, total, title, .. } => {
+            inner.done = index.saturating_sub(1);
+            inner.total = total;
+            inner.activity = format!("Cached {title}");
         }
         Progress::Analyzing { index, total, title, .. } => {
             inner.done = index.saturating_sub(1);

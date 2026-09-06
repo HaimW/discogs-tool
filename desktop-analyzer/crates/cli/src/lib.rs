@@ -36,6 +36,12 @@ pub struct Options {
     pub downloads_at_once: usize,
     /// Tracks analysed at the same time.
     pub analysers_at_once: usize,
+    /// Keep the downloaded audio in `work_dir` and reuse it next time.
+    ///
+    /// Not part of the settings hash: it changes what a rerun costs, never
+    /// what it produces, so a ledger written with it off resumes fine with it
+    /// on and the other way round.
+    pub keep_audio: bool,
     /// Recorded in the settings hash: changing when a second detector runs
     /// changes the numbers, so a ledger written under a different policy is
     /// not resumed.
@@ -169,6 +175,7 @@ pub fn execute(
     let run_options = RunOptions {
         downloads_at_once: options.downloads_at_once,
         analysers_at_once: options.analysers_at_once,
+        keep_audio: options.keep_audio,
         work_dir: &options.work_dir,
         max_attempts: options.max_attempts,
         limit: options.limit,

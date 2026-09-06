@@ -39,6 +39,9 @@ impl<W: Write> Renderer<W> {
             Progress::Downloading { index, total, title, .. } => {
                 self.status(&format!("[{index}/{total}] downloading  {}", trim(title)));
             }
+            Progress::Reusing { index, total, title, .. } => {
+                self.status(&format!("[{index}/{total}] cached       {}", trim(title)));
+            }
             Progress::Analyzing { index, total, title, .. } => {
                 self.status(&format!("[{index}/{total}] analysing    {}", trim(title)));
             }

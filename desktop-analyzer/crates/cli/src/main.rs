@@ -66,9 +66,18 @@ struct Args {
     #[arg(long)]
     ledger: Option<PathBuf>,
 
-    /// Scratch space for downloaded audio. Files are deleted as they are used.
+    /// Scratch space for downloaded audio. Files are deleted as they are used,
+    /// unless --keep-audio is set.
     #[arg(long)]
     work_dir: Option<PathBuf>,
+
+    /// Keep downloaded audio in the work dir, and reuse it on later runs.
+    ///
+    /// A rerun then needs no network at all, which makes iterating on
+    /// detection cheap and immune to rate limits. Costs disk: budget a few
+    /// megabytes a track.
+    #[arg(long)]
+    keep_audio: bool,
 
     /// yt-dlp binary. Defaults to the bundled one, then to $PATH.
     #[arg(long)]
@@ -223,6 +232,7 @@ fn run() -> Result<(), String> {
         max_attempts: args.max_attempts,
         downloads_at_once: args.downloads,
         analysers_at_once: args.analysers,
+        keep_audio: args.keep_audio,
         second_opinion: format!("{:?}", args.second_opinion),
     };
 

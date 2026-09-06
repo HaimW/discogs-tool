@@ -127,6 +127,7 @@ impl Fixture {
                 max_attempts: 3,
                 downloads_at_once: 1,
                 analysers_at_once: 1,
+                keep_audio: false,
                 second_opinion: "Always".into(),
             },
             dir,

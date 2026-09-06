@@ -120,6 +120,14 @@
         <p class="hint">Off by default. This overwrites your own BPM and key.</p>
       </span>
     </div>
+    <div class="check">
+      <input type="checkbox" id="keep_audio">
+      <span>Keep the downloaded audio
+        <p class="hint">Kept in the work folder and reused next time, so a rerun
+          needs no network and cannot be rate-limited. Costs a few megabytes a
+          track.</p>
+      </span>
+    </div>
   </div>
 
   <div class="card">
@@ -225,6 +233,7 @@ function options() {
     yt_dlp: $('ytdlp').value.trim(),
     cookies: $('cookies').value.trim(),
     force: $('force').checked,
+    keep_audio: $('keep_audio').checked,
     limit: isFinite(limit) && limit > 0 ? limit : null,
     max_attempts: parseInt($('attempts').value, 10) || 3,
     downloads: parseInt($('downloads').value, 10) || 8,

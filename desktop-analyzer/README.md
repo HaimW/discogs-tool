@@ -90,7 +90,8 @@ sensible before committing to a run that can take hours.
 | `--force` | Re-analyse tracks whose BPM/key you set or verified yourself. |
 | `--limit N` | Stop after N tracks; the rest stay queued for the next run. |
 | `--ledger` | Resume file. Defaults to `<output>.ledger.json` beside the output. |
-| `--work-dir` | Scratch space for audio. Files are deleted as they are used. |
+| `--work-dir` | Scratch space for audio. Files are deleted as they are used, unless `--keep-audio`. |
+| `--keep-audio` | Keep the audio in the work dir and reuse it next run. A rerun then makes no network call at all — no yt-dlp, no rate limits, no bot checks — which makes iterating on detection cheap. Budget a few MB a track. |
 | `--yt-dlp` | Path to yt-dlp. Defaults to the bundled binary, then `$PATH`. |
 | `--max-attempts` | Retries for transient failures, across all runs. Default 3. |
 | `--timeout` | Seconds before a stalled download is abandoned. Default 30. |
