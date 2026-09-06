@@ -4,6 +4,15 @@
    ============================ */
 
 /* ============ FOOTER CREDIT ============ */
+
+/* Height of the now-playing bar, measured and written by src/player.js when the
+   bar opens. The fallback matches the bar's desktop height and is only used if
+   the measurement has not run. Anything that has to sit clear of the player
+   reads this rather than repeating a magic number: the bar wraps to a taller
+   layout under 1024px, so a hardcoded height is wrong on exactly the screens
+   with least room to spare. */
+:root { --player-height: 0px; }
+
 .footer-credit-wrap {
     position: fixed;
     bottom: 0;
@@ -13,6 +22,11 @@
     padding: 0.25rem 0 0.5rem;
     z-index: 99;
     pointer-events: none;
+    /* Sits above the player rather than under it. The bar is z-index 200 and
+       also pinned to bottom: 0, so at bottom: 0 the credit was simply hidden
+       behind it whenever something was playing. */
+    bottom: var(--player-height);
+    transition: bottom 0.25s ease;
 }
 .footer-credit-link {
     font-size: 0.7rem;
@@ -370,10 +384,20 @@ a:hover { color: var(--accent-hover); }
     color: var(--accent); font-family: var(--font-mono); font-weight: 700;
     margin-bottom: 6px;
 }
+/* The badges sit on their own line under the title rather than beside it: this
+   column is only 230px wide, and inline badges left the titles truncated to
+   "Mor..." and "One...". The title is the thing you read first, so it keeps the
+   full width and the numbers take a second row indented to line up with it. */
 .vt-track {
-    display: grid; grid-template-columns: 30px 1fr auto;
-    gap: 0 10px; padding: 3px 0; align-items: baseline;
+    display: grid;
+    grid-template-columns: 30px 1fr auto;
+    grid-template-areas: "pos title dur" ".   badges badges";
+    gap: 1px 10px; padding: 3px 0; align-items: baseline;
 }
+.vt-pos { grid-area: pos; }
+.vt-title { grid-area: title; }
+.vt-dur { grid-area: dur; }
+.vt-track .track-badges { grid-area: badges; }
 .vt-track:hover .vt-title { color: var(--text); }
 .vt-pos { font-family: var(--font-mono); font-size: 11px; color: var(--accent); font-weight: 700; }
 .vt-title { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -402,9 +426,13 @@ a:hover { color: var(--accent-hover); }
 .play-btn:hover { background: var(--accent-hover); transform: scale(1.1); }
 .play-icon { margin-left: 2px; }
 
-.video-info { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
-.video-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.video-duration { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); flex-shrink: 0; }
+/* The badges start at a fixed column rather than hugging the title, so tempos
+   stack vertically and can be read straight down the list. Hugging the title
+   was tried first and the ragged left edge made scanning for a tempo a zigzag.
+   The duration is pushed to the far right by the auto margin. */
+.video-info { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.video-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.video-duration { font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); flex-shrink: 0; margin-left: auto; padding-left: 8px; }
 .no-videos-message { padding: 40px 20px; text-align: center; color: var(--text-muted); }
 .no-videos-message .hint { font-size: 13px; color: var(--text-dim); margin-top: 8px; }
 
@@ -807,7 +835,18 @@ a:hover { color: var(--accent-hover); }
 
 /* ============ TRACK METADATA ============ */
 
-.track-badges { display: inline-flex; flex-wrap: wrap; gap: 4px; margin: 0 10px; }
+/* Fixed width so the column lines up, and never shrinks: on a narrow screen the
+   track title ellipsises and the numbers stay readable, which is the way round
+   that matters when you are looking for a tempo. */
+.track-badges {
+    display: inline-flex; flex-wrap: nowrap; gap: 4px;
+    flex: 0 0 auto; width: 190px; justify-content: flex-start;
+}
+/* Below the fixed column's width there is no room to reserve it, so the badges
+   fall back to sitting against whatever is left of the title. */
+@media (max-width: 640px) {
+    .track-badges { width: auto; }
+}
 .track-badge {
     font-family: var(--font-mono); font-size: 10px;
     padding: 2px 6px; border-radius: 3px;
@@ -815,9 +854,20 @@ a:hover { color: var(--accent-hover); }
     color: var(--text-muted); white-space: nowrap;
 }
 .track-badge.badge-bpm { border-color: var(--accent); color: var(--accent); }
+/* Same language as the key chip: dashed means the analyzer guessed it and no
+   one has confirmed it yet. Without this an estimated tempo would read exactly
+   like one you typed. */
+.track-badge.badge-bpm.badge-estimated { border-style: dashed; }
+.track-badge .badge-est { opacity: 0.75; margin-left: 1px; }
 .track-badge.badge-key { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
 .track-badge.badge-rating { color: var(--accent); letter-spacing: 1px; }
 .track-badge.badge-shelf { color: #6aa; border-color: #334; }
+
+/* Vinyl tracklist panel: the same badges, smaller, on the printed-label side of
+   the release page. The row is a grid so position, title and badges line up
+   down the panel exactly as they do in the video list. */
+.vt-track .track-badges { width: auto; margin-bottom: 2px; }
+.vt-track .track-badge { font-size: 9px; padding: 1px 4px; }
 
 .meta-btn {
     flex-shrink: 0; width: 32px; height: 32px;
@@ -969,6 +1019,7 @@ a:hover { color: var(--accent-hover); }
 
 /* Prevent content from hiding behind now-playing bar */
 .content { min-height: 100vh; }
+body { padding-bottom: var(--player-height); }
 
 @media (max-width: 1024px) {
     .release-tracklist-col { width: 200px; }

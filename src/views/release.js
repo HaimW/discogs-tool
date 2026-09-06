@@ -77,7 +77,9 @@ function renderRelease(releaseId) {
 
         html += '<div class="release-tracklist-col">';
         if (tracklistTracks.length > 0) {
-            html += vinylTracklistHtml(tracklistTracks);
+            html += vinylTracklistHtml(tracklistTracks, function (t) {
+                return metaForTrack(t, videos, metaById, r.id);
+            });
         } else {
             html += '<div id="vt-panel-' + r.id + '"></div>';
         }
@@ -100,7 +102,7 @@ function renderRelease(releaseId) {
                     '<div class="video-info"><span class="video-title">' + escHtml(vid.title) + '</span>';
                 if (meta) {
                     html += '<span class="track-badges">';
-                    if (meta.bpm != null && meta.bpm !== '') html += '<span class="track-badge badge-bpm">' + meta.bpm + ' BPM</span>';
+                    html += bpmBadge(meta);
                     if (meta.key) html += camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
                     if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                     if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
@@ -127,7 +129,95 @@ function renderRelease(releaseId) {
     });
 }
 
-function vinylTracklistHtml(tracks) {
+// Words that carry no identity, thrown away before matching. Kept in step with
+// the analyzer's own list in desktop-analyzer/crates/core/src/plan.rs — the two
+// sides answer the same question ("is this video this track?") and disagreeing
+// about it would show up as a badge appearing here but not there.
+var TITLE_NOISE = ['official', 'video', 'audio', 'hd', 'hq', '4k', 'remastered',
+    'remaster', 'lyrics', 'lyric', 'full', 'the', 'a', 'vinyl'];
+
+// Share of a tracklist title's words that must survive in the video title.
+var TITLE_MATCH_THRESHOLD = 0.6;
+
+function titleTokens(s) {
+    return String(s == null ? '' : s).toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .split(' ')
+        .filter(function (w) { return w && TITLE_NOISE.indexOf(w) === -1; });
+}
+
+// Find the metadata for a printed tracklist entry.
+//
+// The two are keyed differently and cannot be joined directly: the vinyl
+// tracklist comes from Discogs and says "More Sugar", while metadata is keyed
+// by YouTube id on a video called "Physical Therapy - More Sugar (Official
+// Video)". So we ask how much of the *tracklist* title survives in the video
+// title, which is the same test the analyzer applies when it decides whether a
+// linked video really is the track it claims to be.
+//
+// Returns null when nothing matches well enough. A wrong badge here is worse
+// than no badge: it would put one track's tempo against another's name.
+//
+// The video list can hold several links for one track — duplicate uploads, or
+// genuinely different mixes — while the printed tracklist is the fixed, correct
+// one. So this resolves in two stages. The best-matching title wins outright,
+// which is what keeps "String Thing (Desensitized Mix)" off the video called
+// "String Thing (Sensitized Mix)": those are different records and a near miss
+// must not lend its tempo. Only among videos matching *equally well* — the
+// duplicate-upload case, where either would be the same audio — does it prefer
+// the one that actually carries data, and a confirmed value over an estimate.
+function metaForTrack(track, videos, metaById, releaseId) {
+    var wanted = titleTokens(track.title);
+    if (!wanted.length) return null;
+
+    var best = [];
+    var bestScore = 0;
+    videos.forEach(function (vid) {
+        var have = titleTokens(vid.title);
+        if (!have.length) return;
+        var hits = wanted.filter(function (w) { return have.indexOf(w) !== -1; }).length;
+        var score = hits / wanted.length;
+        if (score < TITLE_MATCH_THRESHOLD) return;
+        if (score > bestScore) { bestScore = score; best = []; }
+        if (score === bestScore) best.push(metaById[releaseId + '_' + vid.youtube_id] || null);
+    });
+
+    var ranked = best.filter(Boolean).sort(function (a, b) {
+        return rank(b) - rank(a);
+    });
+    return ranked.length ? ranked[0] : null;
+}
+
+// How much a record is worth showing when several say the same thing: a value
+// someone confirmed beats an estimate, and an estimate beats an empty record.
+function rank(meta) {
+    if (meta.bpm_verified) return 3;
+    if (meta.bpm != null || meta.key) return 2;
+    return 1;
+}
+
+// The tempo badge, marked as an estimate unless a human has confirmed it.
+//
+// Kept separate from the key chip because the two answer different questions:
+// `camelotChip` also carries the Camelot colour, while this is just a number
+// that must not look more certain than it is. After an analyzer run nearly
+// every value is an estimate, so an unmarked figure would be actively
+// misleading.
+function bpmBadge(meta) {
+    if (meta.bpm == null || meta.bpm === '') return '';
+    var estimated = meta.bpm_source === 'analysis' && !meta.bpm_verified;
+    var title = estimated
+        ? 'Estimated by analysis' +
+          (meta.bpm_confidence != null ? ' — confidence ' + pct(meta.bpm_confidence) : '')
+        : 'BPM';
+    return '<span class="track-badge badge-bpm' + (estimated ? ' badge-estimated' : '') +
+        '" title="' + escHtml(title) + '">' +
+        escHtml(String(meta.bpm)) + ' BPM' +
+        (estimated ? '<span class="badge-est">~</span>' : '') +
+        '</span>';
+}
+
+function vinylTracklistHtml(tracks, lookup) {
     var sides = {};
     var sideOrder = [];
     tracks.forEach(function (t) {
@@ -146,10 +236,17 @@ function vinylTracklistHtml(tracks) {
             html += '<div class="vt-side-label">Side ' + escHtml(side) + '</div>';
         }
         sides[side].forEach(function (t) {
+            var meta = lookup ? lookup(t) : null;
+            var badges = !meta ? '' : (bpmBadge(meta) + (meta.key
+                ? camelotChip(meta.key, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified })
+                : ''));
             html += '<div class="vt-track">' +
                 '<span class="vt-pos">' + escHtml(t.position || '') + '</span>' +
                 '<span class="vt-title">' + escHtml(t.title || '') + '</span>' +
                 '<span class="vt-dur">' + escHtml(t.duration || '') + '</span>' +
+                // Only emitted when there is something to show, so a release
+                // with no analysis keeps the compact single-line rows it has now.
+                (badges ? '<span class="track-badges">' + badges + '</span>' : '') +
                 '</div>';
         });
         html += '</div>';
@@ -185,7 +282,19 @@ async function fetchTracklistLazy(releaseId) {
             .map(function (t, i) {
                 return { position: t.position || '', title: t.title || '', duration: t.duration || '', type: t.type_ || 'track', index: i };
             });
-        if (panelEl) panelEl.innerHTML = vinylTracklistHtml(displayTracks);
+        // Re-read videos and metadata rather than closing over the caller's:
+        // this runs after an await, and a track analysed in the meantime should
+        // show its badge as soon as the panel is rebuilt.
+        var lazyVideos = await dbGetByIndex('videos', 'release_id', releaseId);
+        var lazyMetaById = {};
+        (await dbGetByIndex('track_meta', 'release_id', releaseId) || []).forEach(function (m) {
+            lazyMetaById[m.id] = m;
+        });
+        if (panelEl) {
+            panelEl.innerHTML = vinylTracklistHtml(displayTracks, function (t) {
+                return metaForTrack(t, lazyVideos || [], lazyMetaById, releaseId);
+            });
+        }
     } catch (err) {
         console.error('Tracklist fetch failed:', err);
     }
