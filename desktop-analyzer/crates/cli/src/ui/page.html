@@ -135,11 +135,6 @@
           <input type="text" id="workdir" placeholder="system temp directory">
         </div>
         <div class="field">
-          <label for="cookies">Sign in using cookies from</label>
-          <input type="text" id="cookies" placeholder="none — e.g. firefox, chrome, edge">
-          <p class="hint">Anonymous downloads are what get refused when YouTube decides the traffic looks automated. A signed-in session is tolerated far better; the downloads then belong to that account.</p>
-        </div>
-        <div class="field">
           <label for="ytdlp">yt-dlp</label>
           <input type="text" id="ytdlp" placeholder="found automatically">
         </div>
@@ -168,6 +163,11 @@
         <label for="analysers">Analysers at once</label>
         <input type="number" id="analysers" value="8" min="1" max="32">
         <p class="hint">Each holds a decoded track — about half a gigabyte. This is the one that can run you out of memory.</p>
+      </div>
+      <div class="field">
+        <label for="cookies">Sign the downloads in</label>
+        <input type="text" id="cookies" placeholder="none — a cookies.txt path, or a browser name">
+        <p class="hint">Anonymous downloads are what YouTube refuses once the traffic looks automated; a signed-in session is tolerated far better. A browser name works only where yt-dlp can read that browser's cookies — under WSL it usually cannot, so export a <code>cookies.txt</code> and give its path.</p>
       </div>
     </div>
     <p class="hint" id="speedNote"></p>
@@ -223,7 +223,7 @@ function options() {
     ledger: $('ledger').value.trim(),
     work_dir: $('workdir').value.trim(),
     yt_dlp: $('ytdlp').value.trim(),
-    cookies_from_browser: $('cookies').value.trim(),
+    cookies: $('cookies').value.trim(),
     force: $('force').checked,
     limit: isFinite(limit) && limit > 0 ? limit : null,
     max_attempts: parseInt($('attempts').value, 10) || 3,

@@ -120,7 +120,7 @@ impl UiState {
         };
         let yt_dlp = body["yt_dlp"].as_str().filter(|s| !s.is_empty()).map(user_path);
         let timeout = body["timeout"].as_u64().unwrap_or(30) as u32;
-        let cookies = body["cookies_from_browser"]
+        let cookies = body["cookies"]
             .as_str()
             .filter(|s| !s.trim().is_empty())
             .map(str::to_string);
@@ -197,7 +197,7 @@ fn run(
     options: Options,
     yt_dlp: Option<PathBuf>,
     timeout: u32,
-    cookies_from_browser: Option<String>,
+    cookies: Option<String>,
 ) {
     let resolved = match resolve_yt_dlp(yt_dlp) {
         Ok(p) => p,
@@ -208,7 +208,7 @@ fn run(
     };
     let downloader = YtDlp::new(&resolved)
         .with_timeout(timeout)
-        .with_cookies_from_browser(cookies_from_browser);
+        .with_cookies(cookies);
     match downloader.version() {
         Ok(v) => state.log(format!("yt-dlp {v}")),
         Err(e) => {

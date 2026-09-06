@@ -78,14 +78,18 @@ struct Args {
     #[arg(long, default_value_t = 30, value_name = "SECONDS")]
     timeout: u32,
 
-    /// Take YouTube cookies from this browser: firefox, chrome, edge, brave…
+    /// Sign the downloads in: a cookies.txt file, or a browser name.
     ///
     /// Anonymous requests are what get refused — past a certain rate YouTube
-    /// asks each one to prove it is not automated. A signed-in session is
-    /// tolerated far better. The downloads then belong to that account, which
-    /// is why it is a choice rather than the default.
-    #[arg(long, value_name = "BROWSER")]
-    cookies_from_browser: Option<String>,
+    /// asks each one to prove it is not automated. The downloads then belong to
+    /// that account, which is why it is a choice rather than the default.
+    ///
+    /// A browser name only works where yt-dlp can read that browser's cookie
+    /// store. Under WSL it usually cannot: Windows Chrome, Edge and Brave
+    /// encrypt theirs against the Windows account. Export a cookies.txt and
+    /// pass its path instead.
+    #[arg(long, value_name = "FILE_OR_BROWSER")]
+    cookies: Option<String>,
 
     /// How many tracks to download at once.
     ///
@@ -194,7 +198,7 @@ fn run() -> Result<(), String> {
     let yt_dlp = resolve_yt_dlp(args.yt_dlp.clone().map(user_path_of))?;
     let downloader = YtDlp::new(&yt_dlp)
         .with_timeout(args.timeout)
-        .with_cookies_from_browser(args.cookies_from_browser.clone());
+        .with_cookies(args.cookies.clone());
     // Fail here rather than on the first track: a missing or unrunnable binary
     // is worth knowing about before a long run starts.
     let version = downloader

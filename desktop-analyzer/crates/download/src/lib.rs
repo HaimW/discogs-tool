@@ -41,19 +41,47 @@ pub struct YtDlp {
     binary: PathBuf,
     /// Passed to yt-dlp as `--socket-timeout`.
     timeout_seconds: u32,
-    /// Browser to take YouTube cookies from, if any.
+    /// A cookies.txt file, or a browser name to read cookies from.
     ///
+    /// One field for both because which one works depends on the machine, and
+    /// the difference is visible in the value: anything with a path separator
+    /// is a file. Under WSL a browser name is usually useless — Windows Chrome,
+    /// Edge and Brave encrypt their cookie stores against the Windows account,
+    /// and yt-dlp on the Linux side decrypts none of them ("Extracted 0 cookies
+    /// (100 could not be decrypted)"). An exported cookies.txt works anywhere.
     /// Anonymous requests are what get refused: past a certain rate YouTube
-    /// starts asking each one to prove it is not automated. A signed-in session
-    /// is tolerated far better. The cost is that downloads are then attributable
-    /// to that account, which is a decision for whoever is running it — hence a
-    /// setting rather than a default.
-    cookies_from_browser: Option<String>,
+    /// starts asking each one to prove it is not automated, and a signed-in
+    /// session is tolerated far better. The cost is that the downloads then
+    /// belong to that account, which is why this is a setting, not a default.
+    cookies: Option<String>,
+}
+
+/// A JavaScript engine yt-dlp can use, if this machine has one.
+///
+/// YouTube extraction without one is deprecated: yt-dlp falls back to a
+/// degraded path that finds fewer formats and draws more scrutiny. It only
+/// looks for deno by default, so point it at whatever is actually here.
+///
+/// Looked up once — this runs for every track, and asking the filesystem three
+/// thousand times for an answer that cannot change is waste.
+fn js_runtime() -> Option<&'static str> {
+    use std::sync::OnceLock;
+    static FOUND: OnceLock<Option<&'static str>> = OnceLock::new();
+    *FOUND.get_or_init(|| {
+        ["deno", "node", "bun"].into_iter().find(|name| {
+            Command::new(name)
+                .arg("--version")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+        })
+    })
 }
 
 impl YtDlp {
     pub fn new(binary: impl Into<PathBuf>) -> YtDlp {
-        YtDlp { binary: binary.into(), timeout_seconds: 30, cookies_from_browser: None }
+        YtDlp { binary: binary.into(), timeout_seconds: 30, cookies: None }
     }
 
     pub fn with_timeout(mut self, seconds: u32) -> YtDlp {
@@ -61,10 +89,9 @@ impl YtDlp {
         self
     }
 
-    /// Sign requests with cookies from this browser: "firefox", "chrome",
-    /// "edge", "brave", and the rest of yt-dlp's list.
-    pub fn with_cookies_from_browser(mut self, browser: Option<String>) -> YtDlp {
-        self.cookies_from_browser = browser.filter(|b| !b.trim().is_empty());
+    /// Sign requests, either from a cookies.txt file or from a named browser.
+    pub fn with_cookies(mut self, cookies: Option<String>) -> YtDlp {
+        self.cookies = cookies.filter(|c| !c.trim().is_empty());
         self
     }
 
@@ -101,8 +128,19 @@ impl Downloader for YtDlp {
             .arg(AUDIO_FORMAT)
             .arg("--socket-timeout")
             .arg(self.timeout_seconds.to_string());
-        if let Some(browser) = &self.cookies_from_browser {
-            command.arg("--cookies-from-browser").arg(browser);
+        if let Some(cookies) = &self.cookies {
+            if cookies.contains('/') || cookies.contains('\\') {
+                command.arg("--cookies").arg(cookies);
+            } else {
+                command.arg("--cookies-from-browser").arg(cookies);
+            }
+        }
+        // YouTube extraction without a JavaScript runtime is deprecated and
+        // falls back to a degraded path that fetches fewer formats and draws
+        // more scrutiny. yt-dlp only looks for deno by default, so point it at
+        // whatever this machine has.
+        if let Some(runtime) = js_runtime() {
+            command.arg("--js-runtimes").arg(runtime);
         }
         command
             .arg("-o")
