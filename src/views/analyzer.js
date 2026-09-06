@@ -33,6 +33,10 @@ function renderAnalyzer() {
 // Is one running? A short timeout, because the common answer is "no" and
 // waiting on a closed port for thirty seconds would make the page feel broken.
 function analyzerProbe() {
+    if (window.location.protocol === 'https:') {
+        analyzerMissing();
+        return;
+    }
     var controller = new AbortController();
     var timer = setTimeout(function () { controller.abort(); }, 1500);
     fetch(ANALYZER_URL + '/api/state', { signal: controller.signal })
@@ -59,30 +63,58 @@ function analyzerProbe() {
 
 function analyzerMissing() {
     stopAnalyzerPolling();
+    // An https page cannot reach a plain-http server on this machine at all.
+    // Browsers block that as mixed content before CORS is considered, so no
+    // header the analyzer sends and no flag it is started with can permit it.
+    // Advising --allow-origin here would be advising something that cannot work.
     document.getElementById('analyzer-body').innerHTML =
-        '<div class="analyzer-card">' +
+        window.location.protocol === 'https:' ? analyzerHttpsHtml() : analyzerLocalHtml();
+}
+
+// The page is served over https, so the bridge is impossible from here.
+function analyzerHttpsHtml() {
+    return '<div class="analyzer-card">' +
+        '<h2>Not available on this address</h2>' +
+        '<p>This page is served over <code>https</code>, and a secure page cannot talk to a ' +
+        'plain <code>http</code> server on your own machine. Browsers block that outright as ' +
+        'mixed content, before any permission the analyzer could grant. There is no setting ' +
+        'on either side that changes it.</p>' +
+        '<p><strong>Use the analyzer\u2019s own page instead</strong> \u2014 same controls, ' +
+        'no browser restriction:</p>' +
+        '<div class="analyzer-actions">' +
+        '<a class="btn btn-primary" href="' + ANALYZER_URL + '" target="_blank" rel="noopener noreferrer">' +
+        'Open ' + ANALYZER_URL + '</a>' +
+        '<a class="btn" href="' + ANALYZER_RELEASES + '" target="_blank" rel="noopener noreferrer">Download the analyzer</a>' +
+        '</div>' +
+        '<h3>How the two fit together</h3>' +
+        '<ol class="analyzer-steps">' +
+        '<li>Download a fresh backup from the <strong>Backup</strong> page here.</li>' +
+        '<li>Run <code>discogs-analyzer --ui</code> and point it at that file.</li>' +
+        '<li>Bring the result back with <strong>Restore from backup</strong>.</li>' +
+        '</ol>' +
+        '<p class="hint">They were always meant to exchange a file rather than talk directly. ' +
+        'The controls below appear only when this app is opened over <code>http</code> \u2014 ' +
+        'a local copy, or the analyzer serving it.</p>' +
+        '</div>';
+}
+
+// Served over http, so the bridge can work; it just is not connected yet.
+function analyzerLocalHtml() {
+    return '<div class="analyzer-card">' +
         '<h2>Not connected</h2>' +
         '<p>Either nothing is running on <code>' + ANALYZER_URL + '</code>, or one is running ' +
         'that has not been told to accept this page. It only listens to pages you name, ' +
-        'because a browser reaches <code>127.0.0.1</code> from your own machine — so being ' +
+        'because a browser reaches <code>127.0.0.1</code> from your own machine \u2014 so being ' +
         'local proves nothing about <em>which</em> page is asking, and these controls read ' +
         'files and start programs.</p>' +
         '<p>Start it like this and the controls will appear here:</p>' +
         '<pre class="analyzer-cmd">discogs-analyzer --ui --allow-origin ' + escHtml(window.location.origin) + '</pre>' +
+        '<div class="analyzer-actions">' +
+        '<button class="btn btn-primary" onclick="analyzerProbe()">Check again</button>' +
+        '<a class="btn" href="' + ANALYZER_RELEASES + '" target="_blank" rel="noopener noreferrer">Download the analyzer</a>' +
+        '</div>' +
         '<p class="hint">The analyzer\u2019s own page at <a href="' + ANALYZER_URL + '" ' +
         'target="_blank" rel="noopener noreferrer">' + ANALYZER_URL + '</a> works with no flags.</p>' +
-        '<div class="analyzer-actions">' +
-        '<a class="btn btn-primary" href="' + ANALYZER_RELEASES + '" target="_blank" rel="noopener noreferrer">Download the analyzer</a>' +
-        '<button class="btn" onclick="analyzerProbe()">Check again</button>' +
-        '</div>' +
-        '<h3>Getting started</h3>' +
-        '<ol class="analyzer-steps">' +
-        '<li>Download the archive for your platform and unpack it.</li>' +
-        '<li>Run <code>./get-yt-dlp.sh</code> once — it fetches the downloader.</li>' +
-        '<li>Run <code>./discogs-analyzer --ui</code> \u2014 add ' +
-        '<code>--allow-origin ' + escHtml(window.location.origin) + '</code> to drive it from this page.</li>' +
-        '<li>Download a fresh backup from the Backup page, and point the analyzer at it.</li>' +
-        '</ol>' +
         '</div>';
 }
 
