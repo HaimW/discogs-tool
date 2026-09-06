@@ -1,6 +1,11 @@
 # Section 3b — Desktop BPM/Key Analysis Helper
-Status: **CLI complete, committed and green** — GUI/distribution deferred      Path: complex
-Last worked: 2026-09-04      Branch: `v2-github-pages`
+Status: **Shipped and run over the whole collection** — GUI/distribution deferred      Path: complex
+Last worked: 2026-09-06      Branch: `v2-github-pages`
+
+> **2026-09-06 session:** accuracy fixes, portable binary + local web UI, a
+> security fix, a concurrent pipeline, and a full 2,891-track run. Narrative
+> record, results and the open list: **`docs/analyzer-2026-09-06.md`**.
+> Read that first — it supersedes the "What to pick up next" section below.
 
 ---
 

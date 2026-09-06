@@ -2,6 +2,12 @@
 # Full comparison over a sample of the collection.
 #
 #   ./oracle/bench.sh backup.json [count]
+#   ./oracle/bench.sh backup.json --disputed analysis.json
+#
+# The second form cross-checks exactly the tracks the analyzer could not settle
+# — the ones it marked `disputed`, where its two detectors disagreed and neither
+# convinced. Those are the tracks a third opinion is actually for; sampling the
+# collection at random mostly re-confirms answers that were never in doubt.
 #
 # Downloads dominate. Re-running skips anything already fetched.
 set -euo pipefail
@@ -9,8 +15,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(dirname "$HERE")"
 VENV="$HERE/.venv"
 WORK="${ORACLE_WORK:-$HERE/work}"
-BACKUP="${1:?usage: bench.sh <backup.json> [count]}"
+BACKUP="${1:?usage: bench.sh <backup.json> [count | --disputed analysis.json]}"
 COUNT="${2:-200}"
+DISPUTED=""
+if [ "${2:-}" = "--disputed" ]; then
+  DISPUTED="${3:?--disputed needs the analyzer output file}"
+  COUNT=0
+fi
 
 [ -x "$VENV/bin/python" ] || { echo "run ./oracle/setup.sh first" >&2; exit 1; }
 source "$HOME/.cargo/env" 2>/dev/null || true
@@ -19,9 +30,10 @@ mkdir -p "$WORK/wav"
 
 # A fixed seed, so re-running compares the same tracks and a change in the
 # numbers means a change in the detectors rather than a change of sample.
-python3 - "$BACKUP" "$COUNT" "$WORK" <<'PY'
+python3 - "$BACKUP" "$COUNT" "$WORK" "$DISPUTED" <<'PY'
 import json, random, sys
 backup, count, work = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+disputed_file = sys.argv[4] if len(sys.argv) > 4 else ""
 d = json.load(open(backup))
 c = d["collection"]
 releases = {r["id"]: r for r in c["releases"]}
@@ -33,15 +45,30 @@ for v in c["videos"]:
         continue
     cands.append({"yt": v["youtube_id"], "title": v.get("title", ""),
                   "genres": r.get("genres") or "", "styles": r.get("styles") or ""})
-random.seed(20260906)
-random.shuffle(cands)
-sel = cands[:count]
+if disputed_file:
+    # Only the tracks the analyzer flagged as unsettled. Duration limits still
+    # apply: a 40-minute mix has no single tempo for anyone to disagree about.
+    analysis = json.load(open(disputed_file))
+    wanted = {
+        r["id"] for r in analysis.get("track_meta", [])
+        if r.get("bpm_method") == "disputed"
+    }
+    by_id = {}
+    for v in c["videos"]:
+        by_id[v["id"]] = v["youtube_id"]
+    keep = {by_id[i] for i in wanted if i in by_id}
+    sel = [t for t in cands if t["yt"] in keep]
+    print(f"{len(wanted)} disputed tracks, {len(sel)} of them analysable")
+else:
+    random.seed(20260906)
+    random.shuffle(cands)
+    sel = cands[:count]
 with open(f"{work}/tracks.jsonl", "w") as f:
     for t in sel:
         f.write(json.dumps(t) + "\n")
 json.dump({t["yt"]: {"genres": t["genres"], "styles": t["styles"]} for t in sel},
           open(f"{work}/hints.json", "w"))
-print(f"sampled {len(sel)} of {len(cands)} eligible tracks")
+print(f"selected {len(sel)} tracks")
 PY
 
 echo "fetching (skipping what is already here)"

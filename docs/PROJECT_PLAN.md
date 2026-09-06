@@ -181,7 +181,10 @@ Discogs+YouTube collection, and it keeps the web app 100% serverless.
 **Not a web app feature.** Own repo or own top-level dir. Runs once per
 collection, occasionally after that for new adds.
 
-**Status: [~] built and committed 2026-09-04** as `desktop-analyzer/`.
+**Status: [x] built, shipped and run over the whole collection 2026-09-06**
+as `desktop-analyzer/` — 2,891 tracks analysed, median BPM confidence 0.96.
+Session record, oracle results and remaining open items:
+`docs/analyzer-2026-09-06.md`.
 Everything specced below works from the command line — backup JSON in,
 Restore-compatible `analysis.json` out, resumable, progress UI, and the
 overwrite protection. Deliberately **not** started: the Tauri shell, the
