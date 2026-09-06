@@ -1,5 +1,5 @@
 # Section 3b — Desktop BPM/Key Analysis Helper
-Status: **paused, all work green and UNCOMMITTED**      Path: complex
+Status: **CLI complete, committed and green** — GUI/distribution deferred      Path: complex
 Last worked: 2026-09-04      Branch: `v2-github-pages`
 
 ---
@@ -17,11 +17,17 @@ binary, not just tests. 125 tests pass, clippy is clean, release builds.
 What is **not** started: the Tauri GUI shell, yt-dlp sidecar bundling, and
 distribution/signing — all deliberately deferred.
 
-## ⚠️ Nothing is committed
+## Committed
 
-Everything below is in the working tree only. `git status` will show a large
-uncommitted diff. Nothing was committed by request. If you come back and the
-tree looks alarming, that is why — it is intended, and it is green.
+The work landed on `v2-github-pages` in three commits, all on 2026-09-04:
+
+- `990d768` — core + native analysis crates (§3b phases 1-2)
+- `6c209e6` — web-app half: Camelot wheel, `bpm_verified`, provenance chips
+- `327910a` — `analyzer-cli` and the systematic tempo-bias fix
+
+(Earlier revisions of this file said nothing was committed — that was true
+while the work was in progress, and is not now. Check `git status` for whatever
+is in flight on top of those commits rather than trusting this line.)
 
 Verify in one command:
 
@@ -111,8 +117,11 @@ Beyond spec, also built: energy detection, a `--plan` dry run, and 125 tests.
 
 ## What to pick up next
 
-1. **Run it on a real full collection.** Everything so far has been small
-   samples. This is the highest-value next step and needs no code.
+1. **Run it on a real full collection.** Sampled at 50 tracks on 2026-09-06
+   (~4s/track, so ~3.5h for 3019); the full run has not been done.
+   Export a **fresh** backup first: records are emitted whole, so analysing a
+   stale export and importing it would replace live records with versions that
+   predate any metadata edited since.
 2. **Tauri shell** — the GUI. `pipeline::Progress` was designed to drive it, and
    `SystemClock`/`FileLedgerStore` live in `core` (not the CLI) precisely so
    Tauri reuses them. Add `src-tauri` to the workspace `members`.
@@ -120,9 +129,11 @@ Beyond spec, also built: energy detection, a `--plan` dry run, and 125 tests.
    wiring the CLI" below. Copy `crates/cli/build.rs`.
 3. **yt-dlp as a sidecar**, then distribution/signing. Note the licence
    constraint before designing this: GPLv3 rules out the Mac App Store.
-4. **Reword PROJECT_PLAN.md §3b**: it says skip on `verified: true`, which is
-   the wrong field (that means "YouTube link verified"). The correct flag is
-   `bpm_verified`. The code is right; the plan text invites a regression.
+4. ~~Reword PROJECT_PLAN.md §3b~~ — **done 2026-09-06.** It said skip on
+   `verified: true`, the wrong field (that means "YouTube link verified");
+   the correct flag is `bpm_verified`. The code was always right; the plan
+   text invited a regression. The output contract and the complete-record
+   requirement were corrected in the same pass.
 5. Small: `runtime::sync_dir` is a no-op on Windows (TODO in place, harmless
    until a Windows build exists).
 
