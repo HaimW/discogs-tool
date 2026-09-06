@@ -249,6 +249,7 @@ mod tests {
             youtube_id: "abc".into(),
             video_title: "t".into(),
             decision: analyzer_core::plan::Decision::Analyze,
+            tempo_hint: Default::default(),
         };
         let err = dl.download(&item, Path::new("/tmp")).unwrap_err();
         assert!(!err.retryable, "a missing binary will not fix itself");

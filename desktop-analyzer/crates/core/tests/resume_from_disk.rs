@@ -58,7 +58,7 @@ impl Downloader for SpyDownloader {
 struct StubAnalyzer;
 
 impl Analyzer for StubAnalyzer {
-    fn analyze(&self, path: &Path) -> Result<AnalysisResult, StepError> {
+    fn analyze(&self, path: &Path, _hint: analyzer_core::tempo::TempoHint) -> Result<AnalysisResult, StepError> {
         let id = path.file_stem().unwrap().to_string_lossy().to_string();
         // Encode the id in the bpm so a lost or duplicated result is visible.
         let n = id.rsplit('_').next().unwrap().parse::<f64>().unwrap_or(0.0);
@@ -69,6 +69,10 @@ impl Analyzer for StubAnalyzer {
             key_musical: "A minor".into(),
             key_strength: 0.7,
             energy: Some(6),
+            energy_score: None,
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
             analyzer_version: "test".into(),
         })

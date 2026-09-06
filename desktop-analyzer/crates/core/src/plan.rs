@@ -47,6 +47,8 @@ pub struct PlannedItem {
     pub youtube_id: String,
     pub video_title: String,
     pub decision: Decision,
+    /// What the release's Discogs styles say about reading its tempo.
+    pub tempo_hint: crate::tempo::TempoHint,
 }
 
 impl PlannedItem {
@@ -66,6 +68,12 @@ impl Plan {
     /// `force` ignores the protection on human-entered values, per `--force`.
     pub fn build(backup: &Backup, force: bool) -> Plan {
         let meta = backup.meta_by_id();
+        let hints: std::collections::HashMap<i64, crate::tempo::TempoHint> = backup
+            .collection
+            .releases
+            .iter()
+            .map(|r| (r.id, crate::tempo::hint_for_styles(r.styles.as_deref().unwrap_or(""))))
+            .collect();
         let items = backup
             .collection
             .videos
@@ -79,6 +87,7 @@ impl Plan {
                     youtube_id: video.youtube_id.clone(),
                     video_title: video.title.clone(),
                     decision,
+                    tempo_hint: hints.get(&video.release_id).copied().unwrap_or_default(),
                 }
             })
             .collect();

@@ -181,6 +181,15 @@ Discogs+YouTube collection, and it keeps the web app 100% serverless.
 **Not a web app feature.** Own repo or own top-level dir. Runs once per
 collection, occasionally after that for new adds.
 
+**Status: [~] built and committed 2026-09-04** as `desktop-analyzer/`.
+Everything specced below works from the command line — backup JSON in,
+Restore-compatible `analysis.json` out, resumable, progress UI, and the
+overwrite protection. Deliberately **not** started: the Tauri shell, the
+yt-dlp sidecar, and distribution/signing — all three exist only to hand the
+tool to someone else, and are not needed to run it yourself. Setup, flags
+and accuracy notes: `desktop-analyzer/README.md`. Working record and resume
+point: `.agentsmith/tasks/desktop-bpm-key-analyzer-3b.md`.
+
 - **Stack:** pure Rust, no Python. Tauri shell (small binary, no bundled
   Chromium) + native Rust analysis, faster startup and no PyInstaller
   freeze/packaging fragility.
@@ -196,17 +205,26 @@ collection, occasionally after that for new adds.
 - **Input:** the JSON from `exportFullBackup()` (already exists, no new
   export format).
 - **Pipeline per video:** yt-dlp downloads audio → skip if `track_meta`
-  already has `verified: true` or a set `bpm`/`key` → flag videos >10 min
-  or title-mismatched against `tracklist` for manual review instead of
-  auto-analyzing → aubio for BPM + confidence → libkeyfinder for key +
+  already has `bpm_verified: true` or a human-set `bpm`/`key` → flag videos
+  >10 min or title-mismatched against `tracklist` for manual review instead
+  of auto-analyzing → aubio for BPM + confidence → libkeyfinder for key +
   scale + strength.
+  - ⚠️ The skip flag is `bpm_verified`, **not** `verified`. `verified` means
+    "YouTube link verified" (`src/meta_editor.js`) — skipping on it would
+    skip exactly the tracks whose links are known good. The analyzer treats
+    `verified` as read-only and never writes it.
 - **Output:** JSON keyed the same way as `track_meta`
-  (`releaseId_youtubeId`), each record carries `bpm`, `key`, `confidence`,
-  `verified: false`. Same shape the Restore flow already accepts — no new
-  import code needed on the web side, or only a thin merge-by-confidence
-  step if one doesn't exist yet.
+  (`releaseId_youtubeId`), each record carrying `bpm`, `key` (Camelot),
+  `key_musical`, `energy`, `bpm_confidence`, `key_strength` and per-field
+  `*_source` provenance. Same shape the Restore flow already accepts — no
+  new import code needed on the web side.
+  - Records must be **complete**, not partial: `src/backup.js` restores with
+    `_bulkPut`, which replaces whole records, so a partial one would erase
+    the user's rating/energy/shelf/tags/notes. Unmodelled fields are
+    round-tripped untouched.
 - **Must have:** resumable (long runs, must survive interruption),
-  progress UI, never overwrite verified/manual entries without `--force`.
+  progress UI, never overwrite `bpm_verified`/manually-set entries without
+  `--force`.
 - **Distribution:** signed builds (macOS notarization, ~$99/yr Apple dev
   cert — unsigned macOS builds show a Gatekeeper block screen that kills
   adoption) via GitHub Releases.

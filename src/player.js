@@ -120,15 +120,39 @@ function showNowPlaying(title, artist, coverUrl) {
     if (coverUrl) { cover.src = coverUrl; cover.style.display = 'block'; }
     else { cover.style.display = 'none'; }
     bar.style.display = 'flex';
-    document.body.style.paddingBottom = '116px';
+    _trackPlayerHeight(bar);
     _resetProgress();
     highlightActiveTrack();
+}
+
+// Publish the bar's real height as --player-height, so everything that has to
+// stay clear of it (the page bottom, the footer credit) moves by the right
+// amount. Measured rather than hardcoded because the bar wraps to a taller
+// layout on narrow screens, and observed because that can happen on a resize
+// long after it opened.
+var _playerHeightObserver = null;
+function _trackPlayerHeight(bar) {
+    var publish = function () {
+        var height = bar.offsetHeight;
+        if (height > 0) {
+            document.documentElement.style.setProperty('--player-height', height + 'px');
+        }
+    };
+    publish();
+    if (!_playerHeightObserver && typeof ResizeObserver !== 'undefined') {
+        _playerHeightObserver = new ResizeObserver(publish);
+        _playerHeightObserver.observe(bar);
+    }
 }
 
 function hideNowPlaying() {
     stopViz();
     document.getElementById('now-playing').style.display = 'none';
-    document.body.style.paddingBottom = '0';
+    if (_playerHeightObserver) {
+        _playerHeightObserver.disconnect();
+        _playerHeightObserver = null;
+    }
+    document.documentElement.style.setProperty('--player-height', '0px');
     if (player && playerReady) player.stopVideo();
     isPlaying = false;
     currentQueue = [];

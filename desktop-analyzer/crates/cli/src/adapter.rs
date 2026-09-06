@@ -7,25 +7,46 @@
 use std::path::Path;
 
 use analyzer_analysis::decode::DecodeError;
-use analyzer_analysis::{bpm::BpmError, key::KeyError, AnalysisError};
+use analyzer_analysis::{bpm::BpmError, bpm::TempoBand, key::KeyError, AnalysisError};
 use analyzer_core::meta::AnalysisResult;
 use analyzer_core::pipeline::{Analyzer, Clock, StepError};
+use analyzer_core::tempo::{SecondOpinion, TempoHint};
 
 /// Runs the real detectors over a downloaded file.
 pub struct FileAnalyzer<'a> {
     clock: &'a dyn Clock,
     version: String,
+    band: TempoBand,
+    second_opinion: SecondOpinion,
 }
 
 impl<'a> FileAnalyzer<'a> {
-    pub fn new(clock: &'a dyn Clock, version: impl Into<String>) -> FileAnalyzer<'a> {
-        FileAnalyzer { clock, version: version.into() }
+    /// `band` is the fallback, used for any release whose styles say nothing.
+    pub fn new(clock: &'a dyn Clock, version: impl Into<String>, band: TempoBand) -> FileAnalyzer<'a> {
+        FileAnalyzer {
+            clock,
+            version: version.into(),
+            band,
+            second_opinion: SecondOpinion::default(),
+        }
+    }
+
+    pub fn with_second_opinion(mut self, policy: SecondOpinion) -> FileAnalyzer<'a> {
+        self.second_opinion = policy;
+        self
     }
 }
 
 impl Analyzer for FileAnalyzer<'_> {
-    fn analyze(&self, path: &Path) -> Result<AnalysisResult, StepError> {
-        match analyzer_analysis::analyze_file(path) {
+    fn analyze(&self, path: &Path, hint: TempoHint) -> Result<AnalysisResult, StepError> {
+        // A style-derived band overrides the run's default, except when the run
+        // asked for no folding at all: `--tempo-min 0` means "show me what the
+        // detector actually said", and a genre table should not overrule that.
+        let band = match hint.band_min {
+            Some(min) if self.band.min().is_some() => TempoBand::from_min(min),
+            _ => self.band,
+        };
+        match analyzer_analysis::analyze_file_with(path, band, self.second_opinion.applies_to(hint)) {
             Ok(analysis) => {
                 Ok(analysis.into_result(self.clock.now_iso8601(), self.version.clone()))
             }

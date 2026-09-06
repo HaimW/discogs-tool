@@ -20,7 +20,7 @@ use analyzer_core::{merged_records, ANALYZER_VERSION};
 /// of that is comparability: a run that mixes tempos from two different
 /// detectors is worse than one that redoes the work. Bump this whenever a
 /// change alters the numbers the detectors produce.
-pub const ALGORITHM_TAG: &str = "bpm:beat-grid-v2;key:libkeyfinder-2.2";
+pub const ALGORITHM_TAG: &str = "bpm:beat-grid-v4-folded-2nd;key:libkeyfinder-2.2";
 
 pub struct Options {
     pub backup: PathBuf,
@@ -30,12 +30,25 @@ pub struct Options {
     pub force: bool,
     pub limit: Option<usize>,
     pub max_attempts: u32,
+    /// Lower edge of the one-octave band tempos are folded into. Part of the
+    /// settings hash: changing it changes the numbers, so a ledger written
+    /// under a different band is not resumed.
+    pub tempo_min: f64,
+    /// Recorded in the settings hash: changing when a second detector runs
+    /// changes the numbers, so a ledger written under a different policy is
+    /// not resumed.
+    pub second_opinion: String,
 }
 
 pub struct Outcome {
     pub summary: Summary,
     /// Records written to the export.
     pub written: usize,
+    /// What the energy ranking pass did, and what it could not do.
+    pub energy: analyzer_core::meta::EnergyRanking,
+    /// How many exported tempos were octave-corrected by the `--tempo-min`
+    /// band. Worth seeing: a large number means the band may be wrong.
+    pub tempo_folded: usize,
     /// Ids left alone because they held a human's data and `--force` was off.
     pub protected: Vec<String>,
     pub interrupted: bool,
@@ -106,7 +119,12 @@ pub fn execute(
         .map_err(|e| format!("could not create work dir {}: {e}", options.work_dir.display()))?;
 
     let store = FileLedgerStore::new(&options.ledger);
-    let hash = settings_hash(&[ANALYZER_VERSION, ALGORITHM_TAG]);
+    let hash = settings_hash(&[
+        ANALYZER_VERSION,
+        ALGORITHM_TAG,
+        &format!("tempo-min:{}", options.tempo_min),
+        &format!("second-opinion:{}", options.second_opinion),
+    ]);
     let now = clock.now_iso8601();
     let (mut ledger, resumed) = Ledger::resume_or_new(store.load().as_deref(), &hash, &now);
     report_resume(&resumed, &options.ledger, out);
@@ -130,7 +148,12 @@ pub fn execute(
 
     // Everything the ledger holds, including results from earlier runs — the
     // export is a complete picture, not a diff of this run.
-    let outcome = merged_records(&backup, ledger.results(), options.force);
+    let mut outcome = merged_records(&backup, ledger.results(), options.force);
+    // Energy is calibrated last, because it is the only figure that depends on
+    // the other records: it is a rank within the collection, so it cannot be
+    // decided while the collection is still being analysed.
+    let energy = analyzer_core::meta::rank_energy(&mut outcome.records);
+    let tempo_folded = outcome.records.iter().filter(|r| r.bpm_folded_from.is_some()).count();
     let export = MetaExport::new(
         clock.now_iso8601(),
         format!("desktop-analyzer {ANALYZER_VERSION}"),
@@ -146,6 +169,8 @@ pub fn execute(
     Ok(Outcome {
         summary,
         written: export.track_meta.len(),
+        energy,
+        tempo_folded,
         protected: outcome.protected,
         interrupted: should_stop(),
     })

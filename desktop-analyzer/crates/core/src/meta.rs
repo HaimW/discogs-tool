@@ -45,8 +45,28 @@ pub struct TrackMeta {
     pub key_source: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy_source: Option<String>,
+    /// The raw 0-1 energy score, kept on the record so a later run can re-rank
+    /// the collection without re-downloading it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy_score: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bpm_confidence: Option<f64>,
+    /// The tempo before octave folding, present only when folding changed it.
+    ///
+    /// Folding is the one step that overrules the measurement rather than
+    /// refining it, so the original is kept: if `--tempo-min` is wrong for a
+    /// track, this is what shows it without re-analysing anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_folded_from: Option<f64>,
+    /// How the tempo was decided when two methods were involved — see the
+    /// analysis crate's `TempoMethod`. Absent for the ordinary single-method
+    /// case, present and worth reading on syncopated material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_method: Option<String>,
+    /// The independent estimate, when one was taken. A value far from `bpm` is
+    /// the tool showing its working on a track it found genuinely ambiguous.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_second_opinion: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_strength: Option<f64>,
     /// The un-converted key, e.g. "A minor". `key` always holds Camelot.
@@ -78,7 +98,11 @@ impl TrackMeta {
             bpm_source: None,
             key_source: None,
             energy_source: None,
+            energy_score: None,
             bpm_confidence: None,
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             key_strength: None,
             key_musical: None,
             bpm_verified: None,
@@ -197,6 +221,20 @@ pub struct AnalysisResult {
     /// Estimated 1-10 energy, when the audio supported an estimate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub energy: Option<u8>,
+    /// The continuous 0-1 score behind `energy`. Persisted through the ledger
+    /// so a resumed run can still rank every track against every other one,
+    /// including the ones analysed hours earlier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub energy_score: Option<f64>,
+    /// The tempo the beat grid actually gave, when octave folding overruled it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_folded_from: Option<f64>,
+    /// How the tempo was arrived at, when more than one method was involved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_method: Option<String>,
+    /// An independent tempo estimate, when one was taken.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bpm_second_opinion: Option<f64>,
     pub analyzed_at: String,
     pub analyzer_version: String,
 }
@@ -219,6 +257,9 @@ pub fn merge(existing: &TrackMeta, result: &AnalysisResult, force: bool) -> Opti
     if force || !protection.bpm.is_protected() {
         merged.bpm = Some(result.bpm);
         merged.bpm_confidence = Some(result.bpm_confidence);
+        merged.bpm_folded_from = result.bpm_folded_from;
+        merged.bpm_method = result.bpm_method.clone();
+        merged.bpm_second_opinion = result.bpm_second_opinion;
         merged.bpm_source = Some(SOURCE_ANALYSIS.to_string());
     }
     if force || !protection.key.is_protected() {
@@ -233,6 +274,7 @@ pub fn merge(existing: &TrackMeta, result: &AnalysisResult, force: bool) -> Opti
         if force || !protection.energy.is_protected() {
             merged.energy = Some(energy);
             merged.energy_source = Some(SOURCE_ANALYSIS.to_string());
+            merged.energy_score = result.energy_score;
         }
     }
     merged.analyzed_at = Some(result.analyzed_at.clone());
@@ -244,6 +286,94 @@ pub fn merge(existing: &TrackMeta, result: &AnalysisResult, force: bool) -> Opti
         .extra
         .insert("updated_at".to_string(), Value::String(result.analyzed_at.clone()));
     Some(merged)
+}
+
+/// Below this many analysed tracks, deciles say more about the sample than
+/// about the music, so the absolute scale is left in place.
+pub const MIN_TRACKS_FOR_RANKING: usize = 20;
+
+/// Re-scale analysed energy from an absolute score to a rank within this
+/// collection, and report how many records were changed.
+///
+/// The absolute scale does not work. Energy is 50% loudness, mapped from raw
+/// dBFS, and every mastered record sits inside a couple of dB of every other
+/// one — so the dominant term barely varies and real collections pile up on 5
+/// and 6, using half the scale. Measured on 50 tracks from one collection:
+/// 35 of them landed on 5 or 6, and 1, 2, 3, 9 and 10 were never used at all.
+///
+/// Ranking sidesteps the calibration problem instead of trying to solve it. A
+/// DJ reaching for "an 8" wants one of the harder records *they own*, not a
+/// reading against some absolute reference, so deciles of the collection are
+/// both easier to compute and closer to what the number is used for.
+///
+/// Two consequences worth knowing:
+///
+/// - The scale is relative, so a track's energy can shift as the collection
+///   grows. That is the intended behaviour, not drift.
+/// - Equal scores get equal levels, so a bucket can hold more or fewer than a
+///   tenth of the records.
+///
+/// Only records this tool owns are touched: anything a human typed keeps the
+/// value they gave it.
+pub fn rank_energy(records: &mut [TrackMeta]) -> EnergyRanking {
+    let ours = || {
+        records
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.energy_source.as_deref() == Some(SOURCE_ANALYSIS))
+    };
+    let mut scored: Vec<(usize, f64)> = ours()
+        .filter_map(|(i, r)| r.energy_score.filter(|s| s.is_finite()).map(|s| (i, s)))
+        .collect();
+    // Ours, carries a value, but has no score to rank it by: an older record
+    // from before the score was persisted, or a track this run could not score.
+    // It keeps an absolute-scale number that no longer means the same thing as
+    // its neighbours', and the only honest response is to say so.
+    let unscored = ours()
+        .filter(|(_, r)| r.energy.is_some())
+        .filter(|(_, r)| !r.energy_score.is_some_and(|s| s.is_finite()))
+        .count();
+
+    if scored.len() < MIN_TRACKS_FOR_RANKING {
+        return EnergyRanking { rescaled: 0, unscored };
+    }
+    scored.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let n = scored.len();
+    let mut changed = 0;
+    let mut rank = 0;
+    while rank < n {
+        // Every record sharing this score is one tie group, and the whole group
+        // takes the level of the group's first member. Without this, two
+        // identical readings could straddle a bucket boundary and be reported
+        // as different energies.
+        let score = scored[rank].1;
+        let mut end = rank + 1;
+        while end < n && scored[end].1 == score {
+            end += 1;
+        }
+        let level = (rank * 10 / n + 1).min(10) as u8;
+        for (index, _) in &scored[rank..end] {
+            let record = &mut records[*index];
+            if record.energy != Some(level) {
+                record.energy = Some(level);
+                changed += 1;
+            }
+        }
+        rank = end;
+    }
+    EnergyRanking { rescaled: changed, unscored }
+}
+
+/// What [`rank_energy`] did, and what it could not do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EnergyRanking {
+    /// Records whose energy was moved onto the collection's own scale.
+    pub rescaled: usize,
+    /// Records this tool owns that carry an energy it could not rank, and so
+    /// are still on the absolute scale. A non-zero count means the exported
+    /// energies are not all comparable with each other.
+    pub unscored: usize,
 }
 
 #[cfg(test)]
@@ -259,6 +389,10 @@ mod tests {
             key_musical: "A minor".into(),
             key_strength: 0.7,
             energy: Some(6),
+            energy_score: Some(0.55),
+            bpm_folded_from: None,
+            bpm_method: None,
+            bpm_second_opinion: None,
             analyzed_at: "2026-09-04T12:00:00Z".into(),
             analyzer_version: "0.1.0".into(),
         }
@@ -266,6 +400,116 @@ mod tests {
 
     fn from_json(v: Value) -> TrackMeta {
         serde_json::from_value(v).unwrap()
+    }
+
+    /// `n` analysed records whose scores climb steadily from 0 to just under 1.
+    fn ranked_sample(n: usize) -> Vec<TrackMeta> {
+        (0..n)
+            .map(|i| {
+                let mut m = TrackMeta::new(format!("1_{i}"));
+                m.energy = Some(5);
+                m.energy_source = Some(SOURCE_ANALYSIS.to_string());
+                m.energy_score = Some(i as f64 / n as f64);
+                m
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ranking_spreads_a_clustered_collection_over_the_whole_scale() {
+        let mut records = ranked_sample(100);
+        rank_energy(&mut records);
+        let levels: std::collections::BTreeSet<u8> = records.iter().filter_map(|r| r.energy).collect();
+        assert_eq!(levels, (1..=10).collect(), "every bucket should be used");
+    }
+
+    #[test]
+    fn the_quietest_track_is_a_one_and_the_loudest_a_ten() {
+        let mut records = ranked_sample(50);
+        rank_energy(&mut records);
+        assert_eq!(records.first().unwrap().energy, Some(1));
+        assert_eq!(records.last().unwrap().energy, Some(10));
+    }
+
+    #[test]
+    fn ranking_follows_the_score_order_not_the_record_order() {
+        let mut records = ranked_sample(40);
+        records.reverse(); // highest score first
+        rank_energy(&mut records);
+        assert_eq!(records.first().unwrap().energy, Some(10));
+        assert_eq!(records.last().unwrap().energy, Some(1));
+    }
+
+    #[test]
+    fn identical_scores_get_identical_levels() {
+        // Otherwise two readings of exactly the same loudness could be reported
+        // as different energies purely because of where the bucket edge fell.
+        let mut records = ranked_sample(40);
+        for r in records.iter_mut() {
+            r.energy_score = Some(0.5);
+        }
+        rank_energy(&mut records);
+        let levels: std::collections::BTreeSet<u8> = records.iter().filter_map(|r| r.energy).collect();
+        assert_eq!(levels.len(), 1, "a flat collection has no spread to report");
+    }
+
+    #[test]
+    fn a_small_sample_keeps_the_absolute_scale() {
+        let mut records = ranked_sample(MIN_TRACKS_FOR_RANKING - 1);
+        assert_eq!(rank_energy(&mut records).rescaled, 0);
+        assert!(records.iter().all(|r| r.energy == Some(5)), "left untouched");
+    }
+
+    #[test]
+    fn ranking_never_touches_energy_a_human_set() {
+        let mut records = ranked_sample(40);
+        records[0].energy = Some(9);
+        records[0].energy_source = Some(SOURCE_MANUAL.to_string());
+        rank_energy(&mut records);
+        assert_eq!(records[0].energy, Some(9), "a typed value is not ours to rescale");
+        assert_eq!(records[0].energy_source.as_deref(), Some(SOURCE_MANUAL));
+    }
+
+    #[test]
+    fn records_without_a_score_are_left_alone() {
+        // Older records analysed before the score was persisted, and tracks too
+        // quiet to score at all.
+        let mut records = ranked_sample(40);
+        records[0].energy_score = None;
+        records[0].energy = Some(4);
+        rank_energy(&mut records);
+        assert_eq!(records[0].energy, Some(4));
+    }
+
+    #[test]
+    fn an_unrankable_energy_of_ours_is_reported_not_hidden() {
+        // A record we own, carrying a number, with nothing to rank it by. It
+        // stays on the absolute scale, so its 6 does not mean what its
+        // neighbours' 6 means — and the count is how anyone finds that out.
+        let mut records = ranked_sample(40);
+        records[0].energy_score = None;
+        let ranking = rank_energy(&mut records);
+        assert_eq!(ranking.unscored, 1);
+        assert!(ranking.rescaled > 0, "the rest still rank");
+    }
+
+    #[test]
+    fn a_human_set_energy_is_not_counted_as_unrankable() {
+        // It has no score and never will, but it is not ours and not on our
+        // scale, so it is not a discrepancy to report.
+        let mut records = ranked_sample(40);
+        records[0].energy_score = None;
+        records[0].energy_source = Some(SOURCE_MANUAL.to_string());
+        assert_eq!(rank_energy(&mut records).unscored, 0);
+    }
+
+    #[test]
+    fn ranking_is_idempotent() {
+        let mut records = ranked_sample(60);
+        rank_energy(&mut records);
+        let after_first: Vec<_> = records.iter().map(|r| r.energy).collect();
+        assert_eq!(rank_energy(&mut records).rescaled, 0, "second pass changes nothing");
+        assert_eq!(records.iter().map(|r| r.energy).collect::<Vec<_>>(), after_first);
     }
 
     #[test]

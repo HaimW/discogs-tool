@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ledger::{EntryState, Ledger};
 use crate::meta::AnalysisResult;
+use crate::tempo::TempoHint;
 use crate::plan::{Decision, Plan, PlannedItem, ReviewReason};
 
 /// Fetches audio for one item, returning the file it wrote.
@@ -21,7 +22,11 @@ pub trait Downloader {
 
 /// Analyses one audio file.
 pub trait Analyzer {
-    fn analyze(&self, path: &Path) -> Result<AnalysisResult, StepError>;
+    /// `hint` is what the release's Discogs styles say about reading this
+    /// track's tempo. It is passed per item rather than held by the analyzer
+    /// because one collection can hold both drum and bass and dub, and no
+    /// single setting suits both.
+    fn analyze(&self, path: &Path, hint: TempoHint) -> Result<AnalysisResult, StepError>;
 }
 
 /// Wall-clock time, injected so tests are deterministic.
@@ -237,7 +242,7 @@ pub fn run(
             title: item.video_title.clone(),
         });
 
-        let outcome = analyzer.analyze(&audio);
+        let outcome = analyzer.analyze(&audio, item.tempo_hint);
         // The audio file is scratch space and can be large; drop it either way
         // rather than filling the disk over a long run.
         let _ = std::fs::remove_file(&audio);
@@ -348,7 +353,7 @@ mod tests {
         failures: HashMap<String, StepError>,
     }
     impl Analyzer for FakeAnalyzer {
-        fn analyze(&self, path: &Path) -> Result<AnalysisResult, StepError> {
+        fn analyze(&self, path: &Path, _hint: TempoHint) -> Result<AnalysisResult, StepError> {
             let name = path.file_stem().unwrap().to_string_lossy().to_string();
             if let Some(e) = self.failures.get(&name) {
                 return Err(e.clone());
@@ -360,6 +365,10 @@ mod tests {
                 key_musical: "A minor".into(),
                 key_strength: 1.0,
                 energy: Some(6),
+                energy_score: None,
+                bpm_folded_from: None,
+                bpm_method: None,
+                bpm_second_opinion: None,
                 analyzed_at: "2026-09-04T12:00:00Z".into(),
                 analyzer_version: "test".into(),
             })
@@ -642,7 +651,7 @@ mod save_reporting_tests {
 
     struct OkAnalyzer;
     impl Analyzer for OkAnalyzer {
-        fn analyze(&self, _path: &Path) -> Result<AnalysisResult, StepError> {
+        fn analyze(&self, _path: &Path, _hint: TempoHint) -> Result<AnalysisResult, StepError> {
             Ok(AnalysisResult {
                 bpm: 124.0,
                 bpm_confidence: 0.9,
@@ -650,6 +659,10 @@ mod save_reporting_tests {
                 key_musical: "A minor".into(),
                 key_strength: 1.0,
                 energy: Some(6),
+                energy_score: None,
+                bpm_folded_from: None,
+                bpm_method: None,
+                bpm_second_opinion: None,
                 analyzed_at: "2026-09-04T12:00:00Z".into(),
                 analyzer_version: "test".into(),
             })
