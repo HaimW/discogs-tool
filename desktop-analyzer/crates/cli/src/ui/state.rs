@@ -136,11 +136,20 @@ impl UiState {
         serde_json::json!({ "ok": true })
     }
 
+    /// The single funnel every run end goes through — finished, failed, or
+    /// stopped.
     fn finish(&self, message: String) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.running = false;
-        inner.activity = String::new();
-        inner.result = Some(message);
+        {
+            let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.running = false;
+            inner.activity = String::new();
+            inner.result = Some(message);
+        }
+        // The workers are gone and their buffers are free, but glibc keeps the
+        // arenas. This server stays up long after a run, so give the memory
+        // back rather than sitting on gigabytes of it. Outside the lock: it is
+        // a syscall's worth of work and no reader needs to wait for it.
+        analyzer_core::runtime::release_free_memory();
     }
 }
 

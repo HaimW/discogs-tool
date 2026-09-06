@@ -14,6 +14,33 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::ledger::Ledger;
 use crate::pipeline::{Clock, LedgerStore};
 
+/// Hand memory the allocator has already freed back to the operating system.
+///
+/// glibc keeps freed chunks in per-thread arenas rather than returning them to
+/// the kernel, and with sixteen analysis threads each having decoded tracks of
+/// around half a gigabyte, that adds up: a UI process measured 4.3 GB resident
+/// and completely idle — one thread, zero CPU — hours after its run finished.
+///
+/// It does not matter for a CLI run, which exits moments later. It matters for
+/// the UI server, which stays up for hours afterwards on a machine whose owner
+/// wants that memory back, and for anyone handed the portable binary.
+///
+/// A no-op off glibc. Nothing here is needed for correctness — the memory was
+/// already free, this only stops the process hoarding it.
+pub fn release_free_memory() {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    {
+        extern "C" {
+            fn malloc_trim(pad: usize) -> std::os::raw::c_int;
+        }
+        // SAFETY: takes and returns an integer, touches no pointer we own, and
+        // releases only memory the allocator already considers free.
+        unsafe {
+            malloc_trim(0);
+        }
+    }
+}
+
 /// Wall-clock UTC, formatted the way the web app's records are timestamped
 /// (`2026-09-04T12:00:00Z`).
 #[derive(Debug, Clone, Copy, Default)]
