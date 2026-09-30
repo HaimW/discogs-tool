@@ -12,47 +12,79 @@ serverless.
 
 The web app is never modified by this tool. The two exchange JSON files.
 
-## Status
+## Quick start (Windows, via WSL)
 
-Working end to end from the command line. The Tauri shell, signed builds and
-distribution are not started yet — see PROJECT_PLAN.md section 3b.
+About fifteen minutes the first time, mostly waiting for the build.
+
+1. **Install WSL** (skip if you already have it). In PowerShell as
+   administrator:
+
+   ```powershell
+   wsl --install
+   ```
+
+   Restart when it asks, then open **Ubuntu** from the Start menu and pick a
+   username and password.
+
+2. **Get the code and build it.** In the Ubuntu window:
+
+   ```sh
+   git clone https://github.com/HaimW/discogs-tool.git
+   cd discogs-tool/desktop-analyzer
+   ./scripts/setup.sh
+   ```
+
+   It asks for your Ubuntu password once, to install the compilers. Re-running
+   it is safe; it skips whatever is already done and refreshes yt-dlp.
+
+3. **Start the analyzer:**
+
+   ```sh
+   ./target/release/discogs-analyzer --ui
+   ```
+
+   Leave this window open — the analyzer runs only while it does. Ctrl-C stops
+   it.
+
+4. **Open <http://127.0.0.1:8733> in Chrome** (on Windows, as normal). If it
+   says "This site can't be reached", the analyzer is not running: go back to
+   step 3.
+
+5. **Analyse your collection:**
+   - In the web app, go to **Backup** and download a fresh backup.
+   - In the analyzer page, give it that file. A Windows path such as
+     `C:\Users\you\Downloads\backup.json` works as-is.
+   - Try **Dry run** first, then **Start**. A large collection takes a while;
+     you can stop and start again and it carries on where it left off.
+   - Back in the web app, **Restore from backup** with the file the analyzer
+     wrote.
+
+Next time, only steps 3–5: open Ubuntu, `cd discogs-tool/desktop-analyzer`,
+start it, open the page.
+
+On a Linux machine, skip step 1 and run the rest the same way.
 
 ## Build
 
-Needs a Rust toolchain, plus two native libraries.
+`scripts/setup.sh` does all of this; the steps are here for when you want to do
+them by hand.
 
-**aubio** (tempo detection) — from your package manager:
+Needs a Rust toolchain, a C/C++ compiler, CMake and libclang
+(`sudo apt install build-essential cmake git curl pkg-config libclang-dev` on
+Debian/Ubuntu).
 
-```sh
-sudo apt install libaubio-dev        # Debian/Ubuntu
-brew install aubio                   # macOS
-```
-
-**libkeyfinder** (key detection) — no distro package, so build it into a user
-prefix:
-
-```sh
-git clone https://github.com/mixxxdj/libkeyfinder
-cd libkeyfinder
-cmake -DCMAKE_INSTALL_PREFIX=$HOME/.local -DBUILD_TESTING=OFF -S . -B build
-cmake --build build && cmake --install build
-```
-
-Because that prefix is not on the default search path, **every** cargo command
-needs it on `PKG_CONFIG_PATH`:
+The binary is self-contained: aubio's sources are vendored and compiled by
+`crates/analysis/build.rs`, and FFTW and libkeyfinder are linked as static
+archives. Build those two once:
 
 ```sh
-source "$HOME/.cargo/env"
-export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
+./scripts/build-native.sh     # into native/, gitignored
 cargo build --release
 ```
 
-Set `LIBKEYFINDER_PREFIX` if you installed it somewhere else. The library's
-directory is baked into the binary as an rpath, so it runs without
-`LD_LIBRARY_PATH`.
+Set `NATIVE_PREFIX` if you built them somewhere else.
 
-**yt-dlp** — fetched, not vendored (`binaries/` is gitignored), so grab the
-standalone build once:
+**yt-dlp** — fetched, not vendored (`binaries/` is gitignored):
 
 ```sh
 mkdir -p binaries
@@ -61,10 +93,27 @@ curl -L -o binaries/yt-dlp \
 chmod +x binaries/yt-dlp
 ```
 
-It needs no Python install. Point somewhere else with `--yt-dlp` if you would
-rather use a copy you already have.
+It needs no Python install. Fetch it again when downloads start failing — it
+exists to keep up with YouTube's changes. Point somewhere else with `--yt-dlp`
+if you would rather use a copy you already have.
 
-## Use
+## Point-and-click UI
+
+```sh
+discogs-analyzer --ui
+```
+
+Serves a page on <http://127.0.0.1:8733> with every option below as a control,
+and tries to open it in your browser. The page only works while the command is
+running.
+
+| Flag | Meaning |
+|---|---|
+| `--ui-port N` | Use another port. `0` picks any free one. |
+| `--no-open` | Do not try to open a browser. |
+| `--allow-origin URL` | Let the web app at `URL` drive the analyzer from its own **Analyzer** tab. Only for an `http` copy of the app — the `https` site cannot reach a local `http` server; browsers block it. Use the analyzer's own page instead. |
+
+## Use from the terminal
 
 Export a backup from the web app, then:
 
