@@ -326,13 +326,13 @@ function wlClearFilters() {
 
 function wlPlayRelease(releaseId) {
     if (!playerReady) return;
-    dbGetByIndex('videos', 'release_id', releaseId).then(function (videos) {
+    // Same pick as the release page: one video per track when they match.
+    releasePlayableVideos(releaseId).then(function (videos) {
         if (!videos || videos.length === 0) {
             alert('No videos found for this release. Try syncing the want list first.');
             return;
         }
         return dbGet('wants', releaseId).then(function (w) {
-            videos.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
             currentQueue = videos.map(function (v) {
                 return {
                     youtubeId: v.youtube_id,

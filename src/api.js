@@ -208,6 +208,8 @@ async function syncCollection(config) {
             newRel.synced_at = existing.synced_at;
             newRel.video_count = existing.video_count || 0;
             newRel.country = existing.country || null;
+            // The user's picks of which video is which track (release page).
+            if (existing.video_overrides) newRel.video_overrides = existing.video_overrides;
         }
         await dbPut('releases', newRel);
     }

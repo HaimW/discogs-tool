@@ -4,11 +4,20 @@ function renderTracks() {
     Promise.all([
         dbGetAll('videos'),
         dbGetAll('releases'),
-        dbGetAll('track_meta')
+        dbGetAll('track_meta'),
+        dbGetAll('tracklist')
     ]).then(function (results) {
         var allVideos = results[0];
         var allReleases = results[1];
         var allMeta = results[2];
+
+        // Extra uploads of a track another row already stands for. Hidden
+        // unless asked for, or one record's eight copies crowd the list.
+        var altIds = alternateUploadIds(allVideos, results[3], allReleases);
+        var altCount = Object.keys(altIds).length;
+        if (!_filters.tracks.showAlts) {
+            allVideos = allVideos.filter(function (v) { return !altIds[v.release_id + '_' + v.youtube_id]; });
+        }
 
         var tf = _filters.tracks;
         var relById = {};
@@ -131,6 +140,12 @@ function renderTracks() {
         });
         html += '</div>';
 
+        if (altCount > 0) {
+            html += '<div class="track-filter-group"><label class="vm-alts-toggle">' +
+                '<input type="checkbox"' + (tf.showAlts ? ' checked' : '') + ' onchange="tSetFilter(\'showAlts\', this.checked)"> ' +
+                'Show alternate uploads (' + altCount + ')</label></div>';
+        }
+
         html += '<button class="btn btn-clear" onclick="tClearFilters()">Reset</button>';
         html += '</div>';
 
@@ -222,7 +237,7 @@ function tSetFilter(k, v) { _filters.tracks[k] = v; _filters.tracks.page = 1; re
 function tSetBpm(k, v) { _filters.tracks[k] = v; _filters.tracks.page = 1; renderTracks(); }
 function tSetSort(s) { _filters.tracks.sort = s; renderTracks(); }
 function tClearFilters() {
-    _filters.tracks = { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 };
+    _filters.tracks = { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1, showAlts: false };
     renderTracks();
 }
 function tGoPage(p) { _filters.tracks.page = p; renderTracks(); window.scrollTo(0, 0); }

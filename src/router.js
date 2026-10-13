@@ -3,7 +3,7 @@
 var _currentView = '';
 var _filters = {
     q: '', genre: '', folder: '', country: '', sort: 'artist', page: 1,
-    tracks: { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1 },
+    tracks: { q: '', bpmMin: '', bpmMax: '', key: '', minRating: 0, tag: '', sort: 'artist', page: 1, showAlts: false },
     setlistId: null,
     wantlist: { q: '', genre: '', format: '', decade: '', country: '', sort: 'artist', page: 1 }
 };

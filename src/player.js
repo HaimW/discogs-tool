@@ -192,9 +192,23 @@ function loadFromQueue(index) {
     }
 }
 
+// The rows a click on a page queues up. A list marked data-queue-scope (the
+// release page's "Other videos") queues only itself, and the page's main list
+// leaves it out. Other uploads of a track (.alt-upload) are skipped unless they
+// are the row that was clicked.
+function _queueRows(element) {
+    var scope = element && element.closest ? element.closest('[data-queue-scope]') : null;
+    var all = Array.prototype.slice.call((scope || document).querySelectorAll('.video-item'));
+    return all.filter(function (el) {
+        if (el === element) return true;
+        if (!scope && el.closest('[data-queue-scope]')) return false;
+        return !el.classList.contains('alt-upload');
+    });
+}
+
 function playTrack(element) {
     if (!playerReady) return;
-    var allItems = document.querySelectorAll('.video-item');
+    var allItems = _queueRows(element);
     currentQueue = [];
     var startIndex = 0;
     allItems.forEach(function (el, i) {
@@ -212,7 +226,7 @@ function playTrack(element) {
 }
 
 function playAll() {
-    var allItems = document.querySelectorAll('.video-item');
+    var allItems = _queueRows(null);
     if (allItems.length === 0) return;
     currentQueue = [];
     allItems.forEach(function (el) {
@@ -228,14 +242,32 @@ function playAll() {
     loadFromQueue(0);
 }
 
+// A release's videos as "Play All" plays them: one per tracklist entry, in
+// tracklist order, when they can be matched (see video_match.js) — the same
+// pick the release page shows — otherwise all of them in Discogs' order.
+function releasePlayableVideos(releaseId) {
+    return Promise.all([
+        dbGetByIndex('videos', 'release_id', releaseId),
+        dbGetByIndex('tracklist', 'release_id', releaseId),
+        dbGetByIndex('track_meta', 'release_id', releaseId),
+        dbGet('releases', releaseId)
+    ]).then(function (res) {
+        var tracks = (res[1] || []).sort(function (a, b) { return (a.index || 0) - (b.index || 0); });
+        var metaById = {};
+        (res[2] || []).forEach(function (m) { metaById[m.id] = m; });
+        return playableVideos(tracks, res[0] || [], res[3] && res[3].video_overrides,
+            { rank: rankByMeta(metaById, releaseId) });
+    });
+}
+
 function playAllFromRelease(releaseId) {
-    dbGetByIndex('videos', 'release_id', releaseId).then(function (videos) {
+    releasePlayableVideos(releaseId).then(function (videos) {
         if (videos.length === 0) return;
         return dbGet('releases', releaseId).then(function (r) {
-            videos.sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
             currentQueue = videos.map(function (v) {
                 return {
                     youtubeId: v.youtube_id,
+                    releaseId: releaseId,
                     title: v.title,
                     artist: r ? r.artist : '',
                     cover: r ? (r.thumb_url || '') : '',
@@ -274,10 +306,13 @@ function shufflePlay(limitOverride) {
         var ids = filtered.map(function (r) { return r.id; });
         if (ids.length === 0) { alert('No releases match the current filters.'); return; }
 
-        // Fetch all videos for these releases
-        dbGetAll('videos').then(function (allVideos) {
+        // Fetch all videos for these releases, minus extra uploads of a track
+        // already in the pool — or one record can fill a shuffle 8 times over.
+        Promise.all([dbGetAll('videos'), dbGetAll('tracklist')]).then(function (res) {
+            var allVideos = res[0];
+            var dupes = alternateUploadIds(allVideos, res[1], filtered);
             var matchingVideos = allVideos.filter(function (v) {
-                return v.youtube_id && ids.indexOf(v.release_id) !== -1;
+                return v.youtube_id && ids.indexOf(v.release_id) !== -1 && !dupes[v.release_id + '_' + v.youtube_id];
             });
             if (matchingVideos.length === 0) { alert('No videos found. Try syncing first.'); return; }
 
@@ -309,6 +344,7 @@ function shufflePlay(limitOverride) {
                 var r = relMap[v.release_id] || {};
                 return {
                     youtubeId: v.youtube_id,
+                    releaseId: v.release_id,
                     title: v.title,
                     artist: r.artist || '',
                     cover: r.thumb_url || '',

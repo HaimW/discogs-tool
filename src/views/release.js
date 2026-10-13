@@ -78,56 +78,72 @@ function renderRelease(releaseId) {
         html += '<a class="discogs-link" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener">View on Discogs &nearr;</a>';
         html += '</div>';
 
+        // Videos: one row per tracklist entry when the links can be matched to
+        // it, the rest folded away; otherwise every link, as Discogs lists them.
+        var match = matchVideos(tracklistTracks, videos, r.video_overrides, {
+            rank: rankByMeta(metaById, r.id)
+        });
         html += '<div class="release-tracklist-col">';
         if (tracklistTracks.length > 0) {
             html += vinylTracklistHtml(tracklistTracks, function (t) {
-                return metaForTrack(t, videos, metaById, r.id);
+                return metaForMatchedTrack(t, match, metaById, r.id) ||
+                    (match.grouped ? null : metaForTrack(t, videos, metaById, r.id));
             });
         } else {
             html += '<div id="vt-panel-' + r.id + '"></div>';
         }
         html += '</div></div>';
 
-        // Videos
+        var canOverride = !r._fromWantlist && match.grouped;
+        var rowCtx = { r: r, metaById: metaById, tracks: canOverride ? tracklistTracks : null };
+
         html += '<div class="video-section"><div class="video-header"><h3>Tracklist</h3>';
         if (videos.length > 0) {
+            html += '<div class="video-header-actions">';
+            if (canOverride && r.video_overrides && Object.keys(r.video_overrides).length) {
+                html += '<button class="btn btn-sm" onclick="resetVideoOverrides(' + r.id + ')" title="Forget your picks and match automatically">Reset picks</button>';
+            }
             html += '<button class="btn btn-play-all" onclick="playAllFromRelease(' + r.id + ')">&#9654; Play All</button>';
+            html += '</div>';
         }
         html += '</div>';
 
-        if (videos.length > 0) {
+        if (videos.length > 0 && match.grouped) {
+            html += '<div class="video-list">';
+            match.rows.forEach(function (row) {
+                var t = row.track;
+                if (!row.winner) {
+                    html += '<div class="vm-missing"><span class="vm-pos">' + escHtml(t.position || '') + '</span>' +
+                        '<span class="vm-missing-title">' + escHtml(t.title || '') + '</span>' +
+                        '<span class="vm-missing-note">no matching video</span></div>';
+                    return;
+                }
+                html += videoRowHtml(row.winner, rowCtx, { pos: t.position, dupes: row.dupes.length, trackIndex: t.index });
+                if (row.dupes.length) {
+                    html += '<div class="vm-dupes" id="vm-dupes-' + r.id + '-' + t.index + '" style="display:none;">';
+                    row.dupes.forEach(function (v) {
+                        html += videoRowHtml(v, rowCtx, { cls: 'alt-upload' });
+                    });
+                    html += '</div>';
+                }
+            });
+            html += '</div>';
+
+            if (match.others.length) {
+                html += '<div class="vm-others">' +
+                    '<button class="vm-others-toggle" onclick="toggleVmGroup(this, \'vm-others-' + r.id + '\')" aria-expanded="false">' +
+                    '<span class="vm-caret">&#9656;</span> Other videos (' + match.others.length + ')' +
+                    '<span class="vm-others-hint">other mixes, DJ sets, clips &mdash; not on this pressing</span></button>' +
+                    '<div class="video-list vm-others-list" id="vm-others-' + r.id + '" data-queue-scope style="display:none;">';
+                match.others.forEach(function (v) {
+                    html += videoRowHtml(v, rowCtx, { cls: 'vm-other' });
+                });
+                html += '</div></div>';
+            }
+        } else if (videos.length > 0) {
             html += '<div class="video-list">';
             videos.forEach(function (vid) {
-                var metaId = r.id + '_' + vid.youtube_id;
-                var meta = metaById[metaId] || null;
-                html += '<div class="video-item" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '" data-release-id="' + r.id + '" data-meta-id="' + escHtml(metaId) + '">' +
-                    '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>' +
-                    '<div class="video-info"><span class="video-title">' + escHtml(vid.title) + '</span>';
-                if (meta) {
-                    html += '<span class="track-badges">';
-                    html += bpmBadge(meta);
-                    if (meta.key) {
-                        html += camelotChip(meta.key, {
-                            estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
-                            // Prefer the name the record actually stores over the
-                            // one the table would derive: if an older record
-                            // disagrees, show what is there rather than hiding it.
-                            musical: meta.key_musical || true
-                        });
-                    }
-                    html += energyBadge(meta);
-                    if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
-                    if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
-                    html += '</span>';
-                }
-                if (vid.duration) {
-                    html += '<span class="video-duration">' + escHtml(_fmtTime(Number(vid.duration))) + '</span>';
-                }
-                html += '</div>' +
-                    '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>' +
-                    '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + metaId + '\')" title="Edit metadata">&#9998;</button>' +
-                    '</div>' +
-                    '<div class="track-meta-editor" id="editor-' + metaId + '" style="display:none;"></div>';
+                html += videoRowHtml(vid, rowCtx, {});
             });
             html += '</div>';
         } else {
@@ -139,6 +155,89 @@ function renderRelease(releaseId) {
         document.getElementById('app').innerHTML = html;
         if (tracklistTracks.length === 0) fetchTracklistLazy(releaseId);
     });
+}
+
+// One playable video row on the release page.
+//   ctx  { r, metaById, tracks } — tracks is set when the user may re-pick
+//   opts { pos, dupes, trackIndex, cls }
+function videoRowHtml(vid, ctx, opts) {
+    var r = ctx.r;
+    var metaId = r.id + '_' + vid.youtube_id;
+    var meta = ctx.metaById[metaId] || null;
+    var html = '<div class="video-item' + (opts.cls ? ' ' + opts.cls : '') + '" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '" data-release-id="' + r.id + '" data-meta-id="' + escHtml(metaId) + '">' +
+        '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>' +
+        '<div class="video-info">';
+    if (opts.pos) html += '<span class="vm-pos">' + escHtml(opts.pos) + '</span>';
+    html += '<span class="video-title">' + escHtml(vid.title) + '</span>';
+    if (meta) {
+        html += '<span class="track-badges">';
+        html += bpmBadge(meta);
+        if (meta.key) {
+            html += camelotChip(meta.key, {
+                estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
+                // Prefer the name the record actually stores over the
+                // one the table would derive: if an older record
+                // disagrees, show what is there rather than hiding it.
+                musical: meta.key_musical || true
+            });
+        }
+        html += energyBadge(meta);
+        if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
+        if (meta.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(meta.shelf) + '</span>';
+        html += '</span>';
+    }
+    if (vid.duration) {
+        html += '<span class="video-duration">' + escHtml(_fmtTime(Number(vid.duration))) + '</span>';
+    }
+    html += '</div>';
+    if (opts.dupes) {
+        html += '<button class="meta-btn vm-dupes-btn" onclick="toggleVmGroup(this, \'vm-dupes-' + r.id + '-' + opts.trackIndex + '\')" aria-expanded="false" title="Other uploads of this track">+' + opts.dupes + '</button>';
+    }
+    if (ctx.tracks && opts.cls) {
+        html += '<select class="vm-assign" title="Use this video for a track" aria-label="Use this video for a track" onchange="setVideoOverride(' + r.id + ', this.value, \'' + escJs(vid.youtube_id) + '\')">' +
+            '<option value="">Use for&hellip;</option>';
+        ctx.tracks.forEach(function (t) {
+            html += '<option value="' + t.index + '">' + escHtml((t.position ? t.position + ' — ' : '') + t.title) + '</option>';
+        });
+        html += '</select>';
+    }
+    html += '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>' +
+        '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + metaId + '\')" title="Edit metadata">&#9998;</button>' +
+        '</div>' +
+        '<div class="track-meta-editor" id="editor-' + metaId + '" style="display:none;"></div>';
+    return html;
+}
+
+function toggleVmGroup(btn, id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var open = el.style.display === 'none';
+    el.style.display = open ? '' : 'none';
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.classList.toggle('open', open);
+}
+
+// The user's own pick of which video is a track. Kept on the release record,
+// which a collection re-sync carries over (see syncCollection in api.js).
+async function setVideoOverride(releaseId, trackIndex, youtubeId) {
+    if (trackIndex === '') return;
+    var rel = await dbGet('releases', releaseId);
+    if (!rel) return;
+    var o = rel.video_overrides || {};
+    // A video is one track: drop it from any other track it was picked for.
+    Object.keys(o).forEach(function (k) { if (o[k] === youtubeId) delete o[k]; });
+    o[parseInt(trackIndex, 10)] = youtubeId;
+    rel.video_overrides = o;
+    await dbPut('releases', rel);
+    renderRelease(releaseId);
+}
+
+async function resetVideoOverrides(releaseId) {
+    var rel = await dbGet('releases', releaseId);
+    if (!rel) return;
+    delete rel.video_overrides;
+    await dbPut('releases', rel);
+    renderRelease(releaseId);
 }
 
 // Words that carry no identity, thrown away before matching. Kept in step with
@@ -195,17 +294,25 @@ function metaForTrack(track, videos, metaById, releaseId) {
     });
 
     var ranked = best.filter(Boolean).sort(function (a, b) {
-        return rank(b) - rank(a);
+        return metaRank(b) - metaRank(a);
     });
     return ranked.length ? ranked[0] : null;
 }
 
-// How much a record is worth showing when several say the same thing: a value
-// someone confirmed beats an estimate, and an estimate beats an empty record.
-function rank(meta) {
-    if (meta.bpm_verified) return 3;
-    if (meta.bpm != null || meta.key) return 2;
-    return 1;
+// The metadata for a tracklist entry when its videos were matched: the
+// chosen video's, else the best-ranked of its other uploads (same audio, so the
+// same tempo). Null when the videos were not matched or the track got none.
+function metaForMatchedTrack(track, match, metaById, releaseId) {
+    if (!match.grouped) return null;
+    var row = match.rows.filter(function (x) { return x.track.index === track.index; })[0];
+    if (!row || !row.winner) return null;
+    var own = metaById[releaseId + '_' + row.winner.youtube_id];
+    if (own && metaRank(own) > 1) return own;
+    var ranked = [row.winner].concat(row.dupes)
+        .map(function (v) { return metaById[releaseId + '_' + v.youtube_id]; })
+        .filter(Boolean)
+        .sort(function (a, b) { return metaRank(b) - metaRank(a); });
+    return ranked.length ? ranked[0] : null;
 }
 
 function vinylTracklistHtml(tracks, lookup) {
@@ -251,8 +358,7 @@ function vinylTracklistHtml(tracks, lookup) {
 }
 
 async function fetchTracklistLazy(releaseId) {
-    var panelEl = document.getElementById('vt-panel-' + releaseId);
-    if (!panelEl) return;
+    if (!document.getElementById('vt-panel-' + releaseId)) return;
     try {
         var config = await getConfig();
         if (!config.token) return;
@@ -272,23 +378,13 @@ async function fetchTracklistLazy(releaseId) {
         }
         var rel = await dbGet('releases', releaseId);
         if (rel) { rel.tracklist_synced = true; await dbPut('releases', rel); }
-        var displayTracks = tracklistData
-            .filter(function (t) { return t.type_ !== 'heading'; })
-            .map(function (t, i) {
-                return { position: t.position || '', title: t.title || '', duration: t.duration || '', type: t.type_ || 'track', index: i };
-            });
-        // Re-read videos and metadata rather than closing over the caller's:
-        // this runs after an await, and a track analysed in the meantime should
-        // show its badge as soon as the panel is rebuilt.
-        var lazyVideos = await dbGetByIndex('videos', 'release_id', releaseId);
-        var lazyMetaById = {};
-        (await dbGetByIndex('track_meta', 'release_id', releaseId) || []).forEach(function (m) {
-            lazyMetaById[m.id] = m;
-        });
-        if (panelEl) {
-            panelEl.innerHTML = vinylTracklistHtml(displayTracks, function (t) {
-                return metaForTrack(t, lazyVideos || [], lazyMetaById, releaseId);
-            });
+        // Re-render the whole page: the video list is grouped by the tracklist
+        // too, not just the side panel. Only while still on this release, and
+        // only if there is now something to group by — otherwise renderRelease
+        // would ask for the tracklist again, forever.
+        var hasTracks = tracklistData.some(function (t) { return t.type_ !== 'heading'; });
+        if (hasTracks && _currentView === 'release' && document.getElementById('vt-panel-' + releaseId)) {
+            renderRelease(releaseId);
         }
     } catch (err) {
         console.error('Tracklist fetch failed:', err);
