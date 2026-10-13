@@ -53,7 +53,7 @@ These are not features — they are prerequisites for a paid product.
 - **Where:** `src/marketplace.js:42-43`
 - **What:** `/releases/{id}` returns `lowest_price` as a bare number in USD (no currency), but the code reads `.value`/`.currency`, so `lowestPrice` is always null.
 - **Fix:** Read the number and label it USD, or pass `curr_abbr`; alternatively use `/marketplace/stats/{id}`, which returns `{value, currency}` and now accepts the auth preflight.
-- **Status:** [ ]
+- **Status:*[x] Switched to authenticated `/marketplace/stats/{id}` (2026-10-13). `curr_abbr` is ignored on `/releases/{id}`, so it could not be labelled reliably.
 
 ### MEDIUM
 

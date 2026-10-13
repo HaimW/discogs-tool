@@ -34,10 +34,11 @@ async function syncMarketplaceStats(silent, config) {
             var w = toCheck[i];
             if (!silent) showSyncBanner('Checking availability: ' + (i + 1) + '/' + toCheck.length + ' — ' + w.artist);
             try {
-                // Use authenticated /releases/{id} — returns num_for_sale and lowest_price,
-                // avoids the CORS issue on the public /marketplace/stats endpoint, and
-                // benefits from the higher 60 req/min authenticated rate limit.
-                var data = await discogsGet('/releases/' + w.id, config);
+                // Authenticated /marketplace/stats: returns num_for_sale and
+                // lowest_price as { value, currency }, and its authorization
+                // preflight is accepted (checked 2026-10-13). /releases/{id} is
+                // no substitute — its lowest_price is a bare number, no currency.
+                var data = await discogsGet('/marketplace/stats/' + w.id, config);
                 var numForSale = (data && data.num_for_sale) || 0;
                 var lowestPrice = (data && data.lowest_price) ? data.lowest_price.value : null;
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
