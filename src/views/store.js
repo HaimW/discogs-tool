@@ -405,32 +405,33 @@ async function storeRefreshPrice(releaseId) {
     try {
         var config = await getConfig();
 
-        // Use the authenticated stats endpoint — known working, no pagination needed.
-        // Returns lowest_price; also check for median_price / highest_price if Discogs adds them.
+        // Authenticated /marketplace/stats: the preflight is accepted (checked
+        // 2026-10-13), and unlike /releases/{id} — whose lowest_price is a bare
+        // USD number — it returns { value, currency } in the seller's currency.
+        // It has no highest price, so this stores the lowest only.
         var data = await discogsGet('/marketplace/stats/' + releaseId, config);
 
-        var lowestPrice  = data && data.lowest_price  ? data.lowest_price.value  : null;
-        var highestPrice = data && data.highest_price ? data.highest_price.value : null;
-        var currency     = data && data.lowest_price  ? data.lowest_price.currency : null;
+        var lowestPrice = data && data.lowest_price ? data.lowest_price.value    : null;
+        var currency    = data && data.lowest_price ? data.lowest_price.currency : null;
 
         var item = await dbGet('store_items', releaseId);
         if (item) {
             item.median_price = lowestPrice;
-            item.highest_price = highestPrice;
+            item.highest_price = null;
             item.median_price_currency = currency;
             item.median_price_updated_at = new Date().toISOString();
             await dbPut('store_items', item);
             var cached = _storeItemsCache.find(function (i) { return i.id === releaseId; });
             if (cached) {
                 cached.median_price = lowestPrice;
-                cached.highest_price = highestPrice;
+                cached.highest_price = null;
                 cached.median_price_currency = currency;
             }
         }
 
         if (cell) {
             cell.innerHTML = lowestPrice != null
-                ? escHtml(_formatPriceRange(lowestPrice, highestPrice, currency))
+                ? escHtml(_formatPriceRange(lowestPrice, null, currency))
                 : '<span class="text-dim">—</span>';
         }
     } catch (e) {

@@ -99,11 +99,13 @@ function _startCrossfade() {
 }
 
 function _completeCrossfade() {
+    // The queue can change under a fade (player closed, queue replaced).
+    var item = currentQueue[_cfPreloadedIndex];
+    if (!item) { _abortCrossfade(); return; }
     _cfState = 'switching';
     var p2Time = 0;
     try { p2Time = player2.getCurrentTime() || 0; } catch (e) {}
     currentIndex = _cfPreloadedIndex;
-    var item = currentQueue[currentIndex];
     showNowPlaying(item.title, item.artist, item.cover);
     try {
         player.setVolume(0);

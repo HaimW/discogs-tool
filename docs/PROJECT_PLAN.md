@@ -35,18 +35,24 @@ These are not features — they are prerequisites for a paid product.
 - **Where:** `src/player.js:128-140` (`hideNowPlaying`), `src/crossfade.js:101-113` (`_completeCrossfade`)
 - **What:** `hideNowPlaying()` stops player 1 and clears the queue but never aborts the crossfade. Pressed while `_cfState === 'fading'`: player 2 keeps playing with the bar closed; when the fade completes, `_completeCrossfade()` reads from the now-empty queue → `item` undefined → throws, and player 2 plays forever (only a reload stops it).
 - **Fix:** Call `_abortCrossfade()` inside `hideNowPlaying()` before clearing state; defensively bail in `_completeCrossfade()` if `currentQueue[_cfPreloadedIndex]` is missing.
-- **Status:** [ ]
+- **Status:*[x] Fixed as described (2026-10-13). Verified with a stubbed-player harness: closing mid-fade now stops player 2, and completing a fade over an emptied queue aborts instead of throwing.
 
 #### H2 — "Go to Release" silently bounces to collection (string vs number key)
 - **Where:** `src/player.js:174-200` (`playTrack`/`playAll`), `src/setlists.js:241-252` (`gotoNowPlayingRelease`), `src/views/release.js:4`
 - **What:** Queue items built from DOM rows store `releaseId` as a **string** (`el.dataset.releaseId`), but IndexedDB release keys are **numbers** → `dbGet('releases', "12345")` returns undefined → `renderRelease` falls through to `navigate('collection')`. Works for setlist/suggestion queues (numeric ids), breaks for the most common path (clicking a track row). Stale string ids also persist via `sessionStorage`.
 - **Fix:** `parseInt(el.dataset.releaseId, 10) || null` in `playTrack`/`playAll` (same as `openAddToSetlistPopover` at `setlists.js:153`); defensive `Number(releaseId)` coercion at the top of `renderRelease`.
-- **Status:** [ ]
+- **Status:*[x] Fixed as described (2026-10-13); `renderRelease` coerces with `parseInt`, so stale string ids restored from `sessionStorage` also resolve.
 
 #### H3 — Store "Refresh Price" hits the endpoint the codebase documents as CORS-broken
 - **Where:** `src/views/store.js:402-440` (`storeRefreshPrice`)
 - **What:** Calls `discogsGet('/marketplace/stats/' + id)` with an `Authorization` header — but `api.js:137-141` documents that `/marketplace/stats` doesn't support the CORS preflight the auth header triggers, and `marketplace.js:37-40` deliberately switched to `/releases/{id}` for exactly this reason. Likely fails every time (3 retries + misleading "Network error" banners). Also reads `data.highest_price`, which that endpoint doesn't return, so the price *range* can never render.
 - **Fix:** Use `discogsGet('/releases/' + id)` (gives `num_for_sale` + `lowest_price`); drop the phantom `highest_price` or source it from `/marketplace/price_suggestions`.
+- **Status:*[x] Premise outdated. Checked live on 2026-10-13: the authenticated `/marketplace/stats` preflight is accepted (204, `authorization` allowed, `ACAO: *`), so the endpoint stays. Switching to `/releases/{id}` would have broken it, because there `lowest_price` is a bare USD number, not `{value, currency}`. Fix: dropped the made-up `highest_price` (always stored as null now). **Follow-up:** `marketplace.js:42` reads `/releases/{id}`'s `lowest_price.value`, which is always undefined, so wantlist and notification prices never show. Tracked as H4.
+
+#### H4 — Wantlist/notification prices never show
+- **Where:** `src/marketplace.js:42-43`
+- **What:** `/releases/{id}` returns `lowest_price` as a bare number in USD (no currency), but the code reads `.value`/`.currency`, so `lowestPrice` is always null.
+- **Fix:** Read the number and label it USD, or pass `curr_abbr`; alternatively use `/marketplace/stats/{id}`, which returns `{value, currency}` and now accepts the auth preflight.
 - **Status:** [ ]
 
 ### MEDIUM

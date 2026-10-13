@@ -1,5 +1,8 @@
 
 function renderRelease(releaseId) {
+    // IndexedDB keys are numbers; queues saved in sessionStorage by older
+    // builds carry string ids, which would miss every lookup below.
+    releaseId = parseInt(releaseId, 10) || releaseId;
     Promise.all([
         dbGet('releases', releaseId),
         dbGetByIndex('videos', 'release_id', releaseId),

@@ -153,6 +153,8 @@ function hideNowPlaying() {
         _playerHeightObserver = null;
     }
     document.documentElement.style.setProperty('--player-height', '0px');
+    // Mid-fade, player 2 is the one audibly playing — stop it too.
+    if (_cfState !== 'idle') _abortCrossfade();
     if (player && playerReady) player.stopVideo();
     isPlaying = false;
     currentQueue = [];
@@ -198,7 +200,7 @@ function playTrack(element) {
     allItems.forEach(function (el, i) {
         currentQueue.push({
             youtubeId: el.dataset.youtubeId,
-            releaseId: el.dataset.releaseId || null,
+            releaseId: parseInt(el.dataset.releaseId, 10) || null,
             title: el.dataset.title,
             artist: el.dataset.artist || '',
             cover: el.dataset.cover || '',
@@ -216,7 +218,7 @@ function playAll() {
     allItems.forEach(function (el) {
         currentQueue.push({
             youtubeId: el.dataset.youtubeId,
-            releaseId: el.dataset.releaseId || null,
+            releaseId: parseInt(el.dataset.releaseId, 10) || null,
             title: el.dataset.title,
             artist: el.dataset.artist || '',
             cover: el.dataset.cover || '',
