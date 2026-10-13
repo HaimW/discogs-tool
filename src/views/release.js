@@ -121,7 +121,7 @@ function renderRelease(releaseId) {
                     html += '</span>';
                 }
                 if (vid.duration) {
-                    html += '<span class="video-duration">' + escHtml(String(vid.duration)) + '</span>';
+                    html += '<span class="video-duration">' + escHtml(_fmtTime(Number(vid.duration))) + '</span>';
                 }
                 html += '</div>' +
                     '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>' +
