@@ -12,9 +12,10 @@
 - **Data-safety bugs M2–M5 fixed and price-history recording (F10) started** on 2026-11-06, with tests.
 - **M1 fixed** the same day: all MEDIUM bugs are done.
 - **LOW bugs done too** (L1, L2, L4–L6 fixed; L3 closed as not a bug): the whole §1 bug list is now closed.
-- **P3/P4/P6 started 2026-11-06:** lint + CI in place, all inline handlers replaced (P4 done), toasts, setup token check, lazy background video.
-- **Next up:** ES modules (P3), loading/empty states (P6), PWA (P5), and the B2 YouTube player blocker.
-- **Not started:** the backend (B3) and everything that needs it, the Serverless Professionalization Pass (§5) apart from a first test file, and all F-features except the analyzer's real BPM/key data.
+- **P3/P4/P6 started 2026-11-06:** lint + CI in place, Playwright smoke tests committed and run in CI, all inline handlers replaced (P4 done), toasts, setup token check, lazy background video.
+- **Also 2026-11-06:** backup format v3 with authored/derived labelling (§5c), the Stats view (F11), max-price alerts (F9), and the relative key shown beside every key.
+- **Next up:** ES modules (P3), loading/empty states (P6), PWA (P5), the barcode scanner (F7, last of M-2), and the B2 YouTube player blocker.
+- **Not started:** the backend (B3) and everything that needs it, the track identity refactor (§5c), and the F-features other than F9, F10 (recording only) and F11.
 
 ---
 
@@ -98,6 +99,12 @@ These are not features — they are prerequisites for a paid product.
 - **Fix:** Invalidate/refresh `checked_at` baselines on backup restore, or treat restored stats as `prevNum = null`.
 - **Status:** [x] Fixed 2026-11-06. Restore (`_restoreMarketplaceStats` in `src/backup.js`) keeps any local reading (always newer than a backup's) and adds the backup's only where none exists, flagged `baseline_restored` with `checked_at: null`. The poll treats a flagged row as no baseline, records a fresh one silently, and checks it at the next poll. Tested in `tests/data_safety.test.js`.
 
+#### M6 — Time bar freezes at 0:00 after a crossfade
+- **Where:** `src/player.js` `onPlayerStateChange` (the `_cfState === 'switching'` branch), `showNowPlaying` → `_resetProgress()`
+- **What:** Reported 2026-11-06 with crossfade on: after a song crossfades into the next, the time shows `0:00 / 0:00` and the bar does not move. Finishing a crossfade calls `showNowPlaying()`, whose `_resetProgress()` stops the progress timer; when player 1 then reports PLAYING, the crossfade branch returns early without restarting it. Pause/play brings it back. Tracks that change without a crossfade are fine.
+- **Fix:** Restart the progress timer (and check the visualizer) in the crossfade hand-over branch.
+- **Status:** [x] Fixed 2026-11-06: the hand-over branch now calls `_startProgressUpdate()` and `startViz()` (both safe to call twice). `tests/player_progress.test.js` plays a crossfade hand-over with a stand-in YouTube player and checks the time bar follows the new track; it failed before the fix.
+
 ### LOW
 
 #### L1 — Leaked global timers
@@ -154,7 +161,7 @@ These are not features — they are prerequisites for a paid product.
 
 - [x] **P1 — Fix C1–H3 first.** With a Discogs token in IndexedDB, XSS is account takeover; can't charge money on top of that. *Done: C1 and H1–H4 fixed (2026-06-12, 2026-10-13).*
 - [ ] **P2 — Accounts + cloud sync.** "Your data lives only in this browser" is the #1 commercial weakness; flip it into the #1 paid feature ("synced across devices, never lose crate data"). IndexedDB stays as offline cache; sync to backend.
-- [~] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI. *2026-11-06: tooling in place — `package.json` (`npm test`, `npm run lint`, `npm run check`), ESLint 10 with a config that collects every file's top-level globals so `no-undef` still catches typos across the shared scope (lint is clean), and `.github/workflows/web-app.yml` running lint + tests on every push and PR. 37 unit tests in 6 files. Still to do: ES modules, type checking, and committed browser (Playwright) smoke tests — two were run by hand for P4/P6 but are not in the repo yet.*
+- [~] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI. *2026-11-06: tooling in place — `package.json` (`npm test`, `npm run lint`, `npm run check`), ESLint 10 with a config that collects every file's top-level globals so `no-undef` still catches typos across the shared scope (lint is clean), and `.github/workflows/web-app.yml` running lint + tests on every push and PR. 85 unit tests in 9 files. Playwright smoke tests committed the same day: 12 tests in `tests/e2e/` (click through every nav view, setup token check, toasts, lazy background video), run with `npm run test:e2e` against a local static server with every request blocked except a faked `api.discogs.com`; `@playwright/test` pinned at 1.62.1; a CI `e2e` job runs them beside lint + unit tests. Still to do: ES modules and type checking.*
 - [x] **P4 — Event delegation.** Replace all inline `onclick="..."` string building with `data-*` attributes + delegated listeners (also resolves C1 permanently). *Done 2026-11-06: all 140 inline handlers replaced. `act(type, fnName, args)` (`src/actions.js`) renders `data-on-<type>` + JSON `data-args-<type>`; one listener per event type on `document` (click, change, input, Enter, Escape) calls the function, innermost first, bubbling like inline handlers did. `escJs()` is no longer used. `tests/actions.test.js` fails if an inline handler returns or an action names a missing function; a browser run clicked through every view with no errors.*
 - [ ] **P5 — PWA.** Manifest + service worker → installable, offline crate browsing at record fairs; pairs perfectly with the store/serial feature. *No manifest or service worker yet.*
 - [~] **P6 — UX polish.** Proper toast system instead of `alert()` and sync-banner reuse; loading/empty states; error boundaries. *2026-11-06: toasts done (`src/toast.js`; 11 of 12 `alert()`s and all 6 one-off sync-banner notices replaced — the one left is the forced reload after another tab's DB upgrade, where a blocking message is the point). Setup token check and lazy background video done (§5b). Still to do: loading/empty states and error boundaries.*
@@ -179,12 +186,13 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 
 - [ ] **F7 — Barcode scanner.** Camera → `/database/search?barcode=` → add to collection/wantlist. Most-requested companion-app feature. Browser-only: `BarcodeDetector` API (Chromium) + ZXing-wasm fallback (Safari/Firefox). *Effort: M.*
 - [ ] **F8 — Master-based wantlist matching.** Collectors want "any pressing of this album"; Discogs only matches exact releases — their #1 marketplace gap. Resolve each want's `master_id` (1 call, cacheable forever), then extend the existing `marketplace.js` poll to track lowest price across `/masters/{id}/versions`. ⚠️ Needs rate-budget design within the 60 req/min bucket. *Effort: M.*
-- [ ] **F9 — Wantlist criteria + smart alerts (max price).** Per-want max-price threshold; notifications respect it. Builds directly on the existing notification engine. ⚠️ **Scope limit:** the Discogs API exposes no per-listing marketplace data (only `num_for_sale` + `lowest_price`), so *min-condition* and *seller-country* filters are **not implementable** client-side — max-price only. *Effort: S–M.*
+- [x] **F9 — Wantlist criteria + smart alerts (max price).** Per-want max-price threshold; notifications respect it. Builds directly on the existing notification engine. ⚠️ **Scope limit:** the Discogs API exposes no per-listing marketplace data (only `num_for_sale` + `lowest_price`), so *min-condition* and *seller-country* filters are **not implementable** client-side — max-price only. *Effort: S–M.* *Done 2026-11-06: max price + currency per want, set with the bell button on a want-list card; new `want_alerts` store (DB v10), backed up as authored data, deleted with the want. An alert fires when the lowest price reaches the max while copies are for sale, and not again until the price goes back above it or nothing is for sale (`under_max` guard on the `marketplace_stats` row). The plain 0 → 1+ alert is skipped when the lowest price is above the max. If Discogs lists the release in another currency, the max is not compared: the card shows a ⚠ marker and only the plain for-sale alert fires. Tested in `tests/want_alerts.test.js`.*
 - [~] **F10 — Price history snapshots → sparklines.** We already poll every 30 min; start **timestamping and storing snapshots now** so history accrues before the chart feature ships (zero-cost data accrual). Render sparklines later. *Effort: S.* *Recording done 2026-11-06: a new `price_history` store (DB v9) keeps a reading when count, price or currency changes, plus one a day otherwise (not every 30-minute poll); rows are keyed `<release_id>_<checked_at>` so backups merge; included in the backup file and restore. Still to do: the sparklines.*
-- [ ] **F11 — Stats / collection-value dashboard (non-AI).** Real-time collection value, have/want collectability (from `community.have`/`community.want` on the release endpoint), genre/decade/country breakdowns. All data is already local; pure rendering. Great free-tier hook; the AI report (F1) becomes the premium layer on top. *Effort: S.*
+- [x] **F11 — Stats / collection-value dashboard (non-AI).** Real-time collection value, have/want collectability (from `community.have`/`community.want` on the release endpoint), genre/decade/country breakdowns. All data is already local; pure rendering. Great free-tier hook; the AI report (F1) becomes the premium layer on top. *Effort: S.* *Done 2026-11-06: Stats view (`src/views/stats.js`, nav "Stats"). Value is one `GET /users/{u}/collection/value`, sent only when you press "Refresh value"; Discogs' min/median/max strings are shown as sent (kept in config `collection_value`, not exported). Not real-time. Collectability: have/want are now recorded during a sync's per-release fetch; releases synced before that are filled in by an explicit "Fetch collectability" backfill (one request per release, stoppable, resumes where it stopped, holds the sync lock). Breakdowns by genre, style, decade, country and format as plain HTML/CSS bars. Tested in `tests/stats.test.js`.*
 - [ ] **F12 — Last.fm scrobbling.** The YouTube player already fires track events; POST scrobbles to Last.fm. ⚠️ Signing requires the API shared secret — acceptable embedded client-side for a hobby tool, **not for a paid product**; route through the backend once B3 lands. *Effort: S–M.*
 - [ ] **F13 — Visual shelf finder.** The `shelf` field already exists in track_meta; add an ordered shelf-map view to locate records physically. *Effort: M.* *(The field is edited in `meta_editor.js` and shown on tracks/release pages; no map view yet.)*
 - [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
+- [x] **F15 — Volume control.** Requested 2026-11-06. A volume slider + mute in the now-playing bar, remembered between visits. The crossfade must respect it: today it fades to and resets to volume 100, so a naive slider would be overridden at every track change — fades go between 0 and the chosen volume instead, and moving the slider mid-fade scales both players. *Effort: S–M.* *Done 2026-11-06: mute button + range slider (0–100, default 100; arrow keys/Home/End, no global shortcuts) in the now-playing bar; one master volume (`src/volume.js`) for both YouTube players. Fades run from the chosen volume to 0 and 0 to it; moving the slider or muting mid-fade rescales both players at the current point. New tracks and startup use the chosen volume; mute keeps the slider position. Saved in config (`player_volume`, `player_muted`) and in the backup's config section; a restore skips an invalid volume (not a whole number 0–100) or mute (not true/false) and keeps the current one. Narrow screens: at 768 px and below the now-playing bar no longer overflows the screen (the close button used to be pushed off-screen); at 600 px and below it wraps to two rows; at 480 px and below the slider is hidden and only mute stays. Tested in `tests/volume.test.js` (volume maths) and `tests/e2e/volume.spec.js` (fake YouTube API).*
 - [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
 
 ---
@@ -218,13 +226,14 @@ workflow that builds Linux and macOS binaries on an `analyzer-v*` tag
 #### Analyzer follow-ups (from `docs/analyzer-2026-09-06.md` §6, re-checked 2026-11-06)
 - [x] `--keep-audio` flag: keep and reuse downloaded audio.
 - [x] Idle UI process holding gigabytes: `malloc_trim` when a run ends.
-- [ ] Show the relative key beside the detected one (8A ↔ 8B are the same notes). The Camelot wheel colours relative pairs alike, but no relative key is shown as text.
+- [x] Show the relative key beside the detected one (8A ↔ 8B are the same notes). The Camelot wheel colours relative pairs alike, but no relative key is shown as text. *Done 2026-11-06 in the web app: every key chip (release page, setlist detail, suggestions) and the Tracks key badge end in "rel 8B" (full name on hover and for screen readers); the suggestions "Current" line and the editor's wheel centre show it too. `camelotRelative()` in `src/camelot.js`, tested in `tests/camelot.test.js`.*
 - [ ] Investigate the 302 title-mismatch holds: bad YouTube links, or a matcher too strict? Sample 20 by hand.
 - [ ] Categorise the 128 failures.
 - [ ] Listen to the three high-confidence tracks the oracle disputes (`3sgtB4uusJQ`, `mLTzwrK1VyE`, `-ZonmQZG0GQ`).
 - [ ] Multi-profile key cross-checking (designed; blocked on trustworthy ground truth).
 - [ ] Prefer autocorrelation on disputed tracks (needs a second reference or 15–20 tracks checked by ear).
 - [-] Tauri shell, yt-dlp sidecar bundling, macOS signing — deferred by choice; only needed to hand the tool to someone else.
+- [ ] Read backup v3 from its `authored`/`derived` paths as well as the v2 ones (`collection.*`, top-level `track_meta`). *Added 2026-11-06: v3 keeps those two at their v2 paths only because the analyzer reads them there; once it reads both, a v4 can complete the clean split (§5c).*
 
 - **Stack:** pure Rust, no Python. Tauri shell (small binary, no bundled
   Chromium) + native Rust analysis, faster startup and no PyInstaller
@@ -285,8 +294,8 @@ workflow that builds Linux and macOS binaries on an `analyzer-v*` tag
 ## 4. Suggested milestones
 
 1. **M-0 Hardening:** C1, H1, H2, H3, L2, L4 — safe to demo publicly. **Also start F10 snapshot recording now** (trivial, and history accrues from day one). *2026-11-06: done — C1, H1–H4, L2, L4, and F10 snapshot recording started.*
-2. **M-1 Data safety:** M2, M3, M4, M5 + backup-format version bump. *M2–M5 done 2026-11-06 (DB schema v9; backups now carry `wantlist.price_history`). The authored/derived backup labelling (§5c) is still open.*
-3. **M-2 Quick wins (no backend needed):** F11 stats dashboard, F7 barcode scanner, F9 max-price alerts — visible product momentum while foundation work happens.
+2. **M-1 Data safety:** M2, M3, M4, M5 + backup-format version bump. *M2–M5 done 2026-11-06 (DB schema v9; backups now carry price history). Backup format bumped to v3 with authored/derived labelling (§5c) the same day: M-1 done.*
+3. **M-2 Quick wins (no backend needed):** F11 stats dashboard, F7 barcode scanner, F9 max-price alerts — visible product momentum while foundation work happens. *2026-11-06: F11 and F9 done; F7 open.*
 4. **M-3 Foundation:** B2, B3, P3, P4 — backend, modules, CI.
 5. **M-4 Monetization:** B1, P2, P7 + Stripe/license gating.
 6. **M-5 AI wave 1:** F1, F4 (highest wow-to-effort ratio).
@@ -298,7 +307,7 @@ workflow that builds Linux and macOS binaries on an `analyzer-v*` tag
 ## 5. Approved: Serverless Professionalization Pass
 
 **Status: approved; well under way** (2026-11-06: CI, lint, P4 event
-delegation, toasts, token check and lazy video done; modules, PWA and §5c open). Scope discussed and greenlit 2026-09-04. Pick this up from the CLI and work top to bottom — each
+delegation, toasts, token check, lazy video, Playwright smoke tests and the backup labelling done; modules, PWA and the track identity refactor open). Scope discussed and greenlit 2026-09-04. Pick this up from the CLI and work top to bottom — each
 group is independently shippable.
 
 **Explicitly out of scope:** P2 (accounts + cloud sync). Stays
@@ -342,7 +351,7 @@ serverless/local-first. Nothing here should require a backend.
   per track. Same track across multiple pressings/comps gets analyzed
   and rated separately. Introduce a track identity layer; releases
   reference tracks; BPM/key/rating live on the track.
-- [ ] Label the backup file, don't split it: keep `exportFullBackup()`
+- [x] Label the backup file, don't split it: keep `exportFullBackup()`
   (`src/backup.js`) as **one** JSON file, but structure it so
   **authored** data (track_meta, setlists, store_items — irreplaceable,
   typed by hand) is clearly separated inside from **derived** data
@@ -350,10 +359,20 @@ serverless/local-first. Nothing here should require a backend.
   re-fetchable from Discogs by re-syncing). Today both are flattened
   together with no distinction. Needs a backup-format version bump
   (ties into M2/M3/M4/M5 data-safety bugs already in section 1).
-  *2026-11-06: not implemented. PR #46 (`bd2e2b0`) only rewrote this plan
-  entry; `exportFullBackup()` still writes `_version: 2` grouped by area
-  (`collection`, `wantlist`, `track_meta`, `setlists`, `store`,
-  `notifications`) with no authored/derived split.*
+  *Done 2026-11-06: `exportFullBackup()` writes `_version: 3` with a
+  `_contents` manifest labelling every section authored or derived.
+  `authored` holds setlists, store, price history, notifications,
+  max-price alerts and config; `derived` holds wants and marketplace
+  stats. `track_meta` (authored) and `collection` (derived) stay at their
+  v2 paths because desktop-analyzer reads them there; the clean split is
+  deferred to a v4 once the analyzer reads both (§3b follow-up). The
+  Discogs token is no longer exported (config is an allowlist: username +
+  crossfade settings); a token in an older file is restored only when the
+  browser has none, and the file's username only with its token or into a
+  browser with no login. Restore reads v1, v2, v3 and
+  the analyzer's `analysis.json`, finding sections by path; releases are
+  merged field by field instead of replaced, so local video picks and
+  collectability survive. Tested in `tests/backup.test.js`.*
 
 ---
 

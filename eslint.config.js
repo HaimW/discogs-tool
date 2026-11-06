@@ -26,7 +26,7 @@ for (const f of APP_FILES) {
 
 module.exports = [
     {
-        ignores: ['node_modules/', 'desktop-analyzer/', 'docs/', '.agentsmith/', '.claude/'],
+        ignores: ['node_modules/', 'desktop-analyzer/', 'docs/', '.agentsmith/', '.claude/', 'test-results/', 'playwright-report/', 'blob-report/'],
     },
     js.configs.recommended,
     {
@@ -52,11 +52,23 @@ module.exports = [
         },
     },
     {
-        files: ['tests/**/*.js', 'eslint.config.js'],
+        files: ['tests/**/*.js', 'eslint.config.js', 'playwright.config.js'],
         languageOptions: {
             ecmaVersion: 2024,
             sourceType: 'commonjs',
             globals: { ...globals.node },
+        },
+    },
+    {
+        // Browser smoke tests: the page.evaluate()/waitForFunction() callbacks
+        // run inside the app, so browser globals and the app's own globals
+        // (read-only from a test's point of view) are in scope there.
+        files: ['tests/e2e/**/*.js'],
+        languageOptions: {
+            globals: {
+                ...globals.browser,
+                ...Object.fromEntries(Object.keys(appGlobals).map((k) => [k, 'readonly'])),
+            },
         },
     },
 ];

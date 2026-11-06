@@ -78,9 +78,73 @@ function camelotMusical(code) {
     return e ? e.musical : '';
 }
 
+// ---- Relative key ----
+//
+// Every minor key has a relative major with the same notes (A minor / C major),
+// and on the wheel they share a number: 8A <-> 8B. It is the one key change a
+// DJ can always make, so it is worth showing beside every key we display.
+
+// Musical names written the way people and tools tend to write them, mapped to
+// the sharp spelling the table uses. Flats are folded onto their enharmonic.
+var _CAMELOT_FLATS = { DB: 'C#', EB: 'D#', GB: 'F#', AB: 'G#', BB: 'A#' };
+
+// Accepts a Camelot code ("8A", " 08a ") or a musical name ("A minor", "Am",
+// "Amin", "C major", "C", "Bbm") and returns the canonical code, or null.
+// Keys are stored as Camelot codes, but `key_musical` and older/imported data
+// carry names, so the helper takes either rather than failing quietly.
+function camelotCode(key) {
+    if (key == null) return null;
+    var s = String(key).trim();
+    if (!s) return null;
+    var c = /^0?(\d{1,2})\s*([AB])$/i.exec(s);
+    if (c) {
+        var e = _camelotByCode[parseInt(c[1], 10) + c[2].toUpperCase()];
+        return e ? e.code : null;
+    }
+    var m = /^([A-Ga-g])\s*([#\u266Fb\u266D]?)\s*([A-Za-z]*)$/.exec(s);
+    if (!m) return null;
+    // A lone "m" means minor; a lone "M" is ambiguous (some write it for major,
+    // some for minor), so it is refused rather than guessed.
+    var word = m[3].toLowerCase();
+    var minor;
+    if (m[3] === 'm' || word === 'min' || word === 'minor') minor = true;
+    else if (m[3] === '' || word === 'maj' || word === 'major') minor = false;
+    else return null;
+    var acc = m[2] === '\u266F' ? '#' : (m[2] === '\u266D' ? 'b' : m[2]);
+    var note = m[1].toUpperCase() + acc;
+    if (acc === 'b') note = _CAMELOT_FLATS[note.toUpperCase()] || null;
+    if (!note) return null;
+    var name = note + (minor ? ' minor' : ' major');
+    for (var i = 0; i < CAMELOT_WHEEL.length; i++) {
+        if (CAMELOT_WHEEL[i].musical === name) return CAMELOT_WHEEL[i].code;
+    }
+    return null;
+}
+
+// "8A" -> "8B", "8B" -> "8A". Null for anything that is not a key.
+function camelotRelative(key) {
+    var code = camelotCode(key);
+    if (!code) return null;
+    var last = code.charAt(code.length - 1);
+    return code.slice(0, -1) + (last === 'A' ? 'B' : 'A');
+}
+
+// The compact "rel 8B" marker. Sighted users get the short form with the full
+// name on hover; screen readers get a spoken phrase instead of "rel".
+function camelotRelativeHtml(key) {
+    var rel = camelotRelative(key);
+    if (!rel) return '';
+    var full = 'Relative key ' + rel + ' (' + camelotMusical(rel) + ')';
+    return '<span class="camelot-rel" title="' + escHtml(full) + '">' +
+        '<span aria-hidden="true">rel ' + escHtml(rel) + '</span>' +
+        '<span class="sr-only">, ' + escHtml(full) + '</span>' +
+        '</span>';
+}
+
 // A colour-coded key badge. `opts.estimated` marks a value the desktop analyzer
 // produced rather than a human, so an auto-detected key never passes itself off
-// as confirmed.
+// as confirmed. The relative key rides along at the end; `opts.relative: false`
+// leaves it off.
 function camelotChip(code, opts) {
     var e = camelotEntry(code);
     if (!e) return '';
@@ -99,6 +163,7 @@ function camelotChip(code, opts) {
         ' title="' + escHtml(title) + '">' +
         escHtml(e.code) + (opts.estimated ? '<span class="camelot-est">~</span>' : '') +
         (musical ? '<span class="camelot-musical">' + escHtml(musical) + '</span>' : '') +
+        (opts.relative === false ? '' : camelotRelativeHtml(e.code)) +
         '</span>';
 }
 
@@ -169,6 +234,8 @@ function camelotWheelSvg(selectedCode, onPickFn, context) {
     if (selected) {
         svg += '<text x="' + CX + '" y="' + (CY - 4) + '" class="camelot-hub-code">' + escHtml(selected.code) + '</text>';
         svg += '<text x="' + CX + '" y="' + (CY + 14) + '" class="camelot-hub-name">' + escHtml(selected.musical) + '</text>';
+        var rel = camelotRelative(selected.code);
+        svg += '<text x="' + CX + '" y="' + (CY + 28) + '" class="camelot-hub-rel">rel ' + escHtml(rel) + '</text>';
     } else {
         svg += '<text x="' + CX + '" y="' + (CY + 4) + '" class="camelot-hub-name">no key</text>';
     }

@@ -612,6 +612,20 @@ a:hover { color: var(--accent-hover); }
 .np-cf-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .np-cf-input:focus { border-color: var(--accent); }
 
+/* ============ VOLUME (src/volume.js) ============ */
+
+.np-volume { display: flex; align-items: center; gap: 4px; margin-right: 8px; flex-shrink: 0; }
+.np-volume-slider {
+    width: 90px; height: 24px; margin: 0;
+    accent-color: var(--accent); cursor: pointer;
+}
+.np-volume-slider:focus-visible, .np-btn-mute:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.np-mute-icon { display: block; }
+.np-btn-mute .np-vol-x { display: none; }
+.np-btn-mute[aria-pressed="true"] .np-vol-x { display: inline; }
+.np-btn-mute[aria-pressed="true"] .np-vol-waves { display: none; }
+.np-btn-mute[aria-pressed="true"] + label + .np-volume-slider { opacity: 0.45; }
+
 /* ============ SUGGESTIONS PANEL ============ */
 
 .suggestions-panel {
@@ -656,7 +670,7 @@ a:hover { color: var(--accent-hover); }
 }
 
 @media (max-width: 768px) {
-    .suggestions-panel { bottom: 116px; left: 8px; right: 8px; }
+    .suggestions-panel { bottom: calc(var(--player-height, 100px) + 16px); left: 8px; right: 8px; }
 }
 
 /* ============ QUEUE PANEL ============ */
@@ -704,7 +718,7 @@ a:hover { color: var(--accent-hover); }
 .queue-play-btn, .queue-remove-btn { padding: 4px 8px !important; font-size: 11px !important; }
 
 @media (max-width: 768px) {
-    .queue-panel { right: 8px; left: 8px; width: auto; bottom: 116px; }
+    .queue-panel { right: 8px; left: 8px; width: auto; bottom: calc(var(--player-height, 100px) + 16px); }
 }
 
 /* ============ TRACKS VIEW ============ */
@@ -996,6 +1010,19 @@ a:hover { color: var(--accent-hover); }
     opacity: 0.7; margin-left: 2px; font-weight: 400;
 }
 .camelot-chip-estimated { border-style: dashed; }
+/* Relative key: same quiet treatment as the musical name inside the chip. */
+.camelot-rel {
+    font-size: 9px; font-weight: 400; opacity: 0.72; white-space: nowrap;
+    padding-left: 5px; margin-left: 5px; border-left: 1px solid currentColor;
+}
+.camelot-chip .camelot-rel { margin-left: 0; }
+.camelot-hub-rel {
+    font-size: 9px; fill: var(--text-muted); text-anchor: middle;
+}
+.sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
 
 .camelot-picker {
     align-items: center;
@@ -1130,6 +1157,27 @@ body { padding-bottom: var(--player-height); }
     .release-title { font-size: 22px; }
     .np-actions { gap: 2px; }
     .np-transport { padding: 0 10px; gap: 8px; }
+    /* Volume group (F15): the row is held to the bar's width (in the wrapping
+       column above it would otherwise grow to fit its content), the right
+       column takes the width its controls need, and the track info gives way
+       (its title ellipsizes). */
+    .np-main-row { width: 100%; min-width: 0; }
+    .np-right { flex: 0 1 auto; }
+    .np-volume { margin-right: 2px; gap: 2px; }
+    .np-volume-slider { width: 64px; }
+}
+@media (max-width: 600px) {
+    /* Phones: the bar wraps to two rows, track info + transport above, volume
+       and actions below. Its height is measured into --player-height, which
+       the page padding and the queue / suggestions panels follow. */
+    .np-main-row { flex-wrap: wrap; height: auto; padding: 0; row-gap: 6px; }
+    .np-right { flex: 1 0 100%; justify-content: space-between; }
+    .np-volume { margin-right: 0; }
+}
+@media (max-width: 480px) {
+    /* The mute button stays; the slider goes (the hardware keys set the
+       volume on a phone, and iOS ignores a page-set volume anyway). */
+    .np-volume-slider { display: none; }
 }
 
 /* ============ WANT LIST ============ */
@@ -1582,3 +1630,44 @@ body { padding-bottom: var(--player-height); }
 .setup-status-error { border-color: rgba(229, 83, 61, 0.5); color: #f0a093; }
 .setup-status-ok { border-color: rgba(76, 175, 80, 0.5); color: #9fd8a2; }
 .setup-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+
+/* ============ STATS (src/views/stats.js) ============ */
+
+.stats-top { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 16px; align-items: start; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.stats-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 18px; min-width: 0;
+}
+.stats-card h2 { font-size: 16px; margin-bottom: 12px; }
+.stats-card h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 1.1px; color: var(--text-dim); margin-bottom: 8px; }
+.stats-card .btn { margin-top: 12px; }
+.stats-section-title { font-family: var(--font-mono); font-size: 18px; margin: 28px 0 12px; }
+.stats-note { color: var(--text-muted); font-size: 13px; line-height: 1.6; margin-top: 8px; }
+.stats-value { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.stats-value dt { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.stats-value dd { font-family: var(--font-mono); font-size: 20px; color: var(--accent); }
+.stats-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; margin-top: 18px; }
+
+.stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stats-table caption { text-align: left; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
+.stats-table thead th { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--text-dim); text-align: left; padding: 0 6px 6px 0; }
+.stats-table th[scope="row"] { font-weight: 400; text-align: left; padding: 3px 8px 3px 0;
+    overflow-wrap: anywhere; }
+.stats-table td { padding: 3px 0 3px 8px; }
+.stats-table .num { text-align: right; font-family: var(--font-mono); font-size: 12px; white-space: nowrap; color: var(--text-muted); }
+.stats-bars th[scope="row"] { width: 34%; }
+.stats-bar-cell { width: 45%; }
+.stats-bar { display: block; height: 10px; border-radius: 2px; background: var(--accent); min-width: 2px; }
+.stats-row-other .stats-bar, .stats-row-unknown .stats-bar { background: var(--text-dim); }
+.stats-row-other th, .stats-row-unknown th { color: var(--text-muted); font-style: italic; }
+.stats-link {
+    background: none; border: none; padding: 0; color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.stats-link:hover, .stats-link:focus-visible { color: var(--accent); text-decoration: underline; }
+
+@media (max-width: 768px) {
+    .stats-top { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: 1fr; }
+}

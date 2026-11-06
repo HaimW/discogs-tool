@@ -241,8 +241,8 @@ test('backup export carries price history', async () => {
     ctx.getConfig = async () => CONFIG;
     ctx.downloadBlob = (_name, _type, text) => { saved = JSON.parse(text); };
     await ctx.exportFullBackup();
-    await new Promise(r => setTimeout(r, 0));
-    assert.equal(JSON.stringify(saved.wantlist.price_history), JSON.stringify([{ id: '1_x', release_id: 1 }]));
+    // v3 keeps price history with the authored data (it cannot be re-fetched).
+    assert.equal(JSON.stringify(saved.authored.price_history), JSON.stringify([{ id: '1_x', release_id: 1 }]));
 });
 
 // ---------- M4: a restored tab comes back paused ----------

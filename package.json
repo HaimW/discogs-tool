@@ -7,13 +7,15 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "lint": "eslint .",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "test:e2e": "playwright test"
   },
   "engines": {
     "node": ">=20"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.62.1",
     "eslint": "^10.14.0",
     "globals": "^17.14.0"
   }

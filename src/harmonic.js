@@ -128,7 +128,10 @@ function renderSuggestionsPanel(ctx, cands) {
 
     var metaBits = [];
     if (ctx.bpm) metaBits.push(ctx.bpm + ' BPM');
-    if (ctx.key) metaBits.push('Key ' + ctx.key);
+    if (ctx.key) {
+        var relKey = camelotRelative(ctx.key);
+        metaBits.push('Key ' + escHtml(ctx.key) + (relKey ? ' (relative ' + escHtml(relKey) + ')' : ''));
+    }
     if (!ctx.bpm && !ctx.key) metaBits.push('no BPM/key &mdash; matching by genre');
 
     var html = '<div class="suggestions-header">' +

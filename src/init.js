@@ -82,6 +82,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     _loadCrossfadeSettings();
 
+    // Volume (F15): 'input' applies while dragging / per arrow key; the
+    // value is stored on 'change' (release, or each key step), not every tick.
+    // Browsers fire 'input' before every 'change' on a range input (mouse,
+    // touch and keyboard alike), so 'change' normally only has to save; it
+    // applies the value itself only if no 'input' did.
+    document.getElementById('np-mute').addEventListener('click', toggleMute);
+    var volumeSlider = document.getElementById('np-volume');
+    volumeSlider.addEventListener('input', function () { onVolumeInput(this.value); });
+    volumeSlider.addEventListener('change', function () {
+        if (_clampVolume(this.value, masterVolume) !== masterVolume) onVolumeInput(this.value);
+        _saveVolumeSettings();
+    });
+    _loadVolumeSettings();
+
     updateNotifBadge();
     startMarketplacePoll();
 

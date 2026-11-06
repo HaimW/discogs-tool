@@ -5,7 +5,8 @@ function renderWantList() {
         dbGetAll('wants'),
         dbGetAll('releases'),
         dbGetAll('videos'),
-        dbGetAll('marketplace_stats')
+        dbGetAll('marketplace_stats'),
+        dbGetAll('want_alerts')
     ]).then(function (results) {
         var allWants = results[0];
         var allCollectionReleases = results[1];
@@ -14,6 +15,8 @@ function renderWantList() {
 
         var statsMap = {};
         allStats.forEach(function (s) { statsMap[s.id] = s; });
+        var alertMap = {};
+        results[4].forEach(function (a) { alertMap[a.id] = a; });
 
         // Build collection IDs set for cross-reference
         var collectionIds = {};
@@ -248,9 +251,10 @@ function renderWantList() {
                 }
                 var wStats = statsMap[w.id];
                 if (wStats && wStats.num_for_sale > 0) {
-                    var saleTxt = wStats.num_for_sale + ' for sale';
+                    var forSale = Number(wStats.num_for_sale);
+                    var saleTxt = forSale + ' for sale';
                     if (wStats.lowest_price) saleTxt += ' · ' + (wStats.currency || '') + ' ' + Number(wStats.lowest_price).toFixed(2);
-                    html += '<span class="badge badge-for-sale" title="' + saleTxt + '">' + wStats.num_for_sale + ' for sale</span>';
+                    html += '<span class="badge badge-for-sale" title="' + escHtml(saleTxt) + '">' + escHtml(String(forSale)) + ' for sale</span>';
                 } else if (wStats && wStats.num_for_sale === 0) {
                     html += '<span class="badge badge-not-for-sale">None listed</span>';
                 }
@@ -267,6 +271,15 @@ function renderWantList() {
                     html += '<div class="wl-notes" title="' + escHtml(w.notes) + '">' +
                         escHtml(w.notes.length > 70 ? w.notes.slice(0, 70) + '…' : w.notes) + '</div>';
                 }
+                var wAlert = alertMap[w.id];
+                if (wAlert) {
+                    var alertTxt = 'Alert at or under ' + wAlert.currency + ' ' + Number(wAlert.max_price).toFixed(2);
+                    var mismatch = _wantAlertCurrencyMismatch(wAlert, wStats);
+                    html += '<div class="wl-notes" title="' + escHtml(mismatch
+                        ? 'Discogs lists this in ' + wStats.currency + ', so no price alert can fire; you still get the plain for-sale alert.'
+                        : alertTxt) + '">&#128276; ' + escHtml(alertTxt) +
+                        (mismatch ? ' &#9888; listed in ' + escHtml(wStats.currency) : '') + '</div>';
+                }
                 html += '<div class="wl-card-actions">';
                 if (vc > 0) {
                     html += '<button class="btn btn-sm btn-primary"' + act('click', 'wlPlayRelease', [w.id]) + ' title="Play videos">&#9654;</button>';
@@ -274,11 +287,13 @@ function renderWantList() {
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + w.id + '" target="_blank" rel="noopener" title="View on Discogs">&#8599;</a>';
                 html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + w.id + '" target="_blank" rel="noopener" title="Buy on Discogs marketplace">&#128722;</a>';
                 html += '<button class="btn btn-sm"' + act('click', 'wlOpenPricePanel', [w.id, ACT_THIS]) + ' title="Price suggestions">$</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'wlOpenAlertPanel', [w.id]) + ' title="Max-price alert">&#128276;</button>';
                 html += '<button class="btn btn-sm btn-danger"' + act('click', 'wlRemove', [w.id, w.artist, w.title]) + ' title="Remove from want list">&times;</button>';
                 html += '</div>';
                 html += '</div>';
 
                 html += '<div class="wl-price-panel" id="wl-price-' + w.id + '" style="display:none;"></div>';
+                html += '<div class="wl-price-panel" id="wl-alert-' + w.id + '" style="display:none;"></div>';
                 html += '</div>';
             });
             html += '</div>';
@@ -470,3 +485,103 @@ function wlOpenPricePanel(releaseId, btn) {
 }
 
 // ============ Marketplace Stats & Notifications ============
+
+// ============ Max-price alerts (F9) ============
+
+// Offered in the currency picker. Discogs reports marketplace prices in the
+// account's chosen currency; these are the ones it offers.
+var WANT_ALERT_CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CHF', 'MXN', 'BRL', 'NZD', 'SEK', 'ZAR'];
+
+// A positive amount from what was typed ("12", "12.5", "12,50"), rounded to
+// cents; null for anything else.
+function _parseMaxPrice(text) {
+    var s = String(text == null ? '' : text).trim().replace(',', '.');
+    if (!/^\d+(\.\d+)?$|^\.\d+$/.test(s)) return null;
+    var n = Math.round(Number(s) * 100) / 100;
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// True when Discogs lists this want in a different currency than its max, so
+// the max cannot be compared and no price alert fires.
+function _wantAlertCurrencyMismatch(wantAlert, stats) {
+    return !!(wantAlert && stats && stats.currency && stats.currency !== wantAlert.currency);
+}
+
+function wlOpenAlertPanel(releaseId) {
+    var panel = document.getElementById('wl-alert-' + releaseId);
+    if (!panel) return;
+    if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+    Promise.all([dbGet('want_alerts', releaseId), dbGet('marketplace_stats', releaseId)]).then(function (r) {
+        var wa = r[0];
+        var stats = r[1];
+        var currency = (wa && wa.currency) || (stats && stats.currency) || 'USD';
+        var currencies = WANT_ALERT_CURRENCIES.slice();
+        if (currencies.indexOf(currency) === -1) currencies.unshift(currency);
+
+        var html = '<div class="wl-price-table">';
+        html += '<div class="wl-price-header">Max-price alert</div>';
+        html += '<div class="wl-price-row">';
+        html += '<input type="text" inputmode="decimal" class="form-input" id="wl-alert-price-' + releaseId + '"' +
+            ' aria-label="Maximum price" placeholder="Max price" value="' +
+            escHtml(wa ? Number(wa.max_price).toFixed(2) : '') + '"' + act('enter', 'wlSaveAlert', [releaseId]) + '>';
+        html += '<select class="form-input" id="wl-alert-cur-' + releaseId + '" aria-label="Currency">';
+        currencies.forEach(function (c) {
+            html += '<option value="' + escHtml(c) + '"' + (c === currency ? ' selected' : '') + '>' + escHtml(c) + '</option>';
+        });
+        html += '</select>';
+        html += '</div>';
+        if (stats && stats.currency && stats.currency !== currency) {
+            html += '<div class="wl-price-empty">&#9888; Discogs lists this in ' + escHtml(stats.currency) +
+                '. A max in ' + escHtml(currency) + ' cannot be compared, so only the plain for-sale alert fires.</div>';
+        }
+        html += '<div class="wl-price-row">';
+        html += '<button class="btn btn-sm btn-primary"' + act('click', 'wlSaveAlert', [releaseId]) + '>Save</button>';
+        if (wa) html += '<button class="btn btn-sm btn-danger"' + act('click', 'wlClearAlert', [releaseId]) + '>Clear</button>';
+        html += '</div>';
+        html += '</div>';
+        panel.innerHTML = html;
+        panel.style.display = 'block';
+    }).catch(function (err) {
+        showToast('Could not open the max-price alert: ' + err.message, 'error');
+    });
+}
+
+function wlSaveAlert(releaseId) {
+    var priceEl = document.getElementById('wl-alert-price-' + releaseId);
+    var curEl = document.getElementById('wl-alert-cur-' + releaseId);
+    if (!priceEl || !curEl) return;
+    var max = _parseMaxPrice(priceEl.value);
+    if (max === null) {
+        showToast('Enter a max price above zero, like 25 or 25.50.', 'error');
+        return;
+    }
+    var currency = String(curEl.value || '').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) {
+        showToast('Pick a currency for the max price.', 'error');
+        return;
+    }
+    dbGet('want_alerts', releaseId).then(function (existing) {
+        var now = new Date().toISOString();
+        return dbPut('want_alerts', {
+            id: releaseId,
+            max_price: max,
+            currency: currency,
+            created_at: existing ? (existing.created_at || now) : now,
+            updated_at: now
+        });
+    }).then(function () {
+        showToast('Alert set: ' + currency + ' ' + max.toFixed(2) + ' or less. If it is already listed at or under that, the alert comes with the next marketplace check.', 'success');
+        renderWantList();
+    }).catch(function (err) {
+        showToast('Could not save the alert: ' + err.message, 'error');
+    });
+}
+
+function wlClearAlert(releaseId) {
+    dbDelete('want_alerts', releaseId).then(function () {
+        showToast('Max-price alert cleared', 'info');
+        renderWantList();
+    }).catch(function (err) {
+        showToast('Could not clear the alert: ' + err.message, 'error');
+    });
+}

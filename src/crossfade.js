@@ -87,24 +87,22 @@ function _preloadNextTrack() {
 }
 
 // `fadeSeconds`: this track's fade from _effectiveFadeSeconds (the chosen
-// length when not given).
+// length when not given). Player 1 fades from the master volume to 0 while
+// player 2 rises from 0 to it (src/volume.js); _cfFadeRatio lets a volume or
+// mute change mid-fade rescale both at the current position.
 function _startCrossfade(fadeSeconds) {
     _cfState = 'fading';
-    var startVol = 100;
-    try { startVol = player.getVolume(); } catch (e) {}
+    _cfFadeRatio = 0;
+    _applyVolumeNow();
     try {
-        player2.setVolume(0);
         player2.playVideo();
     } catch (e) { _abortCrossfade(); return; }
     var steps = Math.max(1, Math.ceil((fadeSeconds || cfSeconds) * 1000 / 50));
     var tick = 0;
     _cfFadeInterval = setInterval(function () {
         tick++;
-        var ratio = tick / steps;
-        var vol1 = Math.round(startVol * (1 - ratio));
-        var vol2 = Math.round(100 * ratio);
-        try { player.setVolume(vol1); } catch (e) {}
-        try { player2.setVolume(vol2); } catch (e) {}
+        _cfFadeRatio = Math.min(1, tick / steps);
+        _applyVolumeNow();
         if (tick >= steps) {
             clearInterval(_cfFadeInterval);
             _cfFadeInterval = null;
@@ -118,12 +116,14 @@ function _completeCrossfade() {
     var item = currentQueue[_cfPreloadedIndex];
     if (!item) { _abortCrossfade(); return; }
     _cfState = 'switching';
+    _cfFadeRatio = null;
     var p2Time = 0;
     try { p2Time = player2.getCurrentTime() || 0; } catch (e) {}
     currentIndex = _cfPreloadedIndex;
     showNowPlaying(item.title, item.artist, item.cover);
+    // Player 1 loads the next track silently; player 2 keeps the full volume.
+    _applyVolumeNow();
     try {
-        player.setVolume(0);
         player.loadVideoById({ videoId: item.youtubeId, startSeconds: p2Time });
     } catch (e) {}
     // Volume restore + player2 stop happen in onPlayerStateChange when player1 fires PLAYING
@@ -131,10 +131,12 @@ function _completeCrossfade() {
 
 function _abortCrossfade() {
     if (_cfFadeInterval) { clearInterval(_cfFadeInterval); _cfFadeInterval = null; }
-    try { player2.pauseVideo(); player2.setVolume(0); } catch (e) {}
-    try { player.setVolume(100); } catch (e) {}
+    try { player2.pauseVideo(); } catch (e) {}
     _cfState = 'idle';
     _cfPreloadedIndex = -1;
+    _cfFadeRatio = null;
+    // Player 1 back to the master volume (0 when muted), player 2 silent.
+    _applyVolumeNow();
 }
 
 function onPlayer2StateChange(event) {

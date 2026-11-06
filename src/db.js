@@ -1,7 +1,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 9;
+var DB_VERSION = 10;
 var _db = null;
 
 function openDB() {
@@ -76,6 +76,12 @@ function openDB() {
                 var ph = db.createObjectStore('price_history', { keyPath: 'id' });
                 ph.createIndex('release_id', 'release_id');
                 ph.createIndex('checked_at', 'checked_at');
+            }
+            // v10: a max price per want (F9), keyed by release id like `wants`.
+            // Authored by the person, so it travels in the backup; removed
+            // with the want (removeWantData).
+            if (!db.objectStoreNames.contains('want_alerts')) {
+                db.createObjectStore('want_alerts', { keyPath: 'id' });
             }
         };
         req.onblocked = function () {

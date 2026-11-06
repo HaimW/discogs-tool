@@ -237,6 +237,12 @@ async function syncCollection(config) {
             newRel.country = existing.country || null;
             // The user's picks of which video is which track (release page).
             if (existing.video_overrides) newRel.video_overrides = existing.video_overrides;
+            // Have/want counts from the per-release fetch (F11 Stats).
+            if (existing.community_fetched_at) {
+                newRel.community_have = existing.community_have;
+                newRel.community_want = existing.community_want;
+                newRel.community_fetched_at = existing.community_fetched_at;
+            }
         }
         await dbPut('releases', newRel);
     }
@@ -312,6 +318,7 @@ async function syncVideosInBackground(config) {
             rel.video_count = vidCount;
             rel.synced_at = new Date().toISOString();
             rel.country = data.country || rel.country || null;
+            applyReleaseCommunity(rel, data);
 
             var tracklistData = data.tracklist || [];
             for (var ti = 0; ti < tracklistData.length; ti++) {
@@ -344,6 +351,17 @@ async function syncVideosInBackground(config) {
     setTimeout(function () { hideSyncBanner(); }, 2000);
     _syncRunning = false;
     document.getElementById('sync-btn').disabled = false;
+}
+
+// Copies the community have/want counts of a /releases/{id} response onto a
+// release record (F11 Stats). The fetch time is set even when Discogs sent
+// no counts, so the Stats backfill does not ask for that release again.
+function applyReleaseCommunity(rel, data) {
+    var c = (data && data.community) || {};
+    rel.community_have = Number.isFinite(c.have) ? c.have : null;
+    rel.community_want = Number.isFinite(c.want) ? c.want : null;
+    rel.community_fetched_at = new Date().toISOString();
+    return rel;
 }
 
 function formatEta(seconds) {

@@ -25,10 +25,45 @@ function _shouldSnapshot(existing, numForSale, lowestPrice, currency, nowMs) {
     return lastMs === null || nowMs - lastMs >= PRICE_HISTORY_HEARTBEAT_MS;
 }
 
+// Max-price alerts (F9). Given the marketplace_stats row before this check
+// (or undefined), this reading {num_for_sale, lowest_price, currency} and the
+// want's want_alerts row (or undefined), decides which alerts to raise and the
+// new `under_max` guard for the stats row:
+//   - No usable baseline (no row, or one restored from a backup, M5): no
+//     alert; the guard is set silently from this reading.
+//   - A max applies only when its currency matches the reading's. Otherwise
+//     (none set, or a mismatch) the plain 0 -> 1+ for-sale alert is used.
+//   - 'under_max' fires on entering (for sale && lowest <= max), and not again
+//     until the reading leaves that state (price above max, or none for sale).
+//   - The plain 0 -> 1+ alert is suppressed when the lowest price is above an
+//     applicable max, and is superseded by an 'under_max' alert raised at once.
+// Returns { notify: ['for_sale' | 'under_max'], under_max, max_applies }.
+function _wantAlertDecision(prev, reading, wantAlert) {
+    var num = reading.num_for_sale || 0;
+    var lowest = reading.lowest_price == null ? null : Number(reading.lowest_price);
+    var max = wantAlert ? Number(wantAlert.max_price) : NaN;
+    var maxApplies = !!(wantAlert && max > 0 && reading.currency &&
+        wantAlert.currency === reading.currency);
+    var underNow = maxApplies && num > 0 && lowest !== null && lowest <= max;
+    var result = { notify: [], under_max: underNow, max_applies: maxApplies };
+
+    if (!prev || prev.baseline_restored) return result;
+
+    if (underNow && !prev.under_max) {
+        result.notify.push('under_max');
+    } else if (num > 0 && (prev.num_for_sale || 0) === 0) {
+        var aboveMax = maxApplies && lowest !== null && lowest > max;
+        if (!aboveMax) result.notify.push('for_sale');
+    }
+    return result;
+}
+
 // Everything kept about a want, removed with it: its marketplace reading, its
-// alerts and its price history (M2). Safe to call for an id with none of these.
+// alerts, its price history (M2) and its max price (F9). Safe to call for an
+// id with none of these.
 async function removeWantData(releaseId) {
     await dbDelete('marketplace_stats', releaseId);
+    await dbDelete('want_alerts', releaseId);
     var removedAlerts = await dbDeleteByIndex('notifications', 'release_id', releaseId);
     await dbDeleteByIndex('price_history', 'release_id', releaseId);
     if (removedAlerts) updateNotifBadge();
@@ -75,14 +110,15 @@ async function syncMarketplaceStats(silent, config) {
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
 
                 var existing = await dbGet('marketplace_stats', w.id);
+                var wantAlert = await dbGet('want_alerts', w.id);
                 // A row restored from a backup carries an old count, not one
-                // this browser saw: treat it as no baseline (M5).
-                var prevNum = (existing && !existing.baseline_restored) ? (existing.num_for_sale || 0) : null;
-
-                // Notify only when previously confirmed as 0 and now has listings.
-                // prevNum === null means never checked — record baseline silently.
-                if (numForSale > 0 && prevNum !== null && prevNum === 0) {
-                    await dbPut('notifications', {
+                // this browser saw: it is no baseline (M5). Alerts need a
+                // change this browser saw; see _wantAlertDecision.
+                var decision = _wantAlertDecision(existing,
+                    { num_for_sale: numForSale, lowest_price: lowestPrice, currency: currency }, wantAlert);
+                for (var ni = 0; ni < decision.notify.length; ni++) {
+                    var note = {
+                        type: decision.notify[ni],
                         release_id: w.id,
                         artist: w.artist,
                         title: w.title,
@@ -91,9 +127,14 @@ async function syncMarketplaceStats(silent, config) {
                         currency: currency,
                         seen: false,
                         created_at: new Date().toISOString()
-                    });
-                    updateNotifBadge();
+                    };
+                    if (note.type === 'under_max') {
+                        note.max_price = Number(wantAlert.max_price);
+                        note.max_currency = wantAlert.currency;
+                    }
+                    await dbPut('notifications', note);
                 }
+                if (decision.notify.length) updateNotifBadge();
 
                 var nowMs = Date.now();
                 var checkedAt = new Date(nowMs).toISOString();
@@ -116,7 +157,8 @@ async function syncMarketplaceStats(silent, config) {
                     lowest_price: lowestPrice,
                     currency: currency,
                     checked_at: checkedAt,
-                    snapshot_at: snapshotAt
+                    snapshot_at: snapshotAt,
+                    under_max: decision.under_max
                 });
             } catch (err) {
                 console.error('Marketplace stats error for ' + w.id + ':', err);
@@ -142,7 +184,8 @@ function startMarketplacePoll() {
     if (_marketplacePollInterval) return;
     _marketplacePollInterval = setInterval(function () {
         getConfig().then(function (config) {
-            if (config.token && config.username && !_marketplaceSyncRunning && !_wantSyncRunning) {
+            // _syncRunning: the collection sync or the stats backfill is using the API.
+            if (config.token && config.username && !_marketplaceSyncRunning && !_wantSyncRunning && !_syncRunning) {
                 syncMarketplaceStats(true, config);
             }
         });
@@ -200,7 +243,10 @@ function openNotifPanel() {
                 html += '<div class="notif-item-title">' + escHtml(n.title) + '</div>';
                 html += '<div class="notif-item-detail">';
                 html += '<span class="notif-count">' + n.num_for_sale + ' for sale';
-                if (n.lowest_price) html += ' · ' + (n.currency || '') + ' ' + Number(n.lowest_price).toFixed(2);
+                if (n.lowest_price) html += ' · ' + escHtml(n.currency || '') + ' ' + Number(n.lowest_price).toFixed(2);
+                if (n.type === 'under_max' && n.max_price != null) {
+                    html += ' · at or under your max ' + escHtml(n.max_currency || '') + ' ' + Number(n.max_price).toFixed(2);
+                }
                 html += '</span>';
                 html += '<span class="notif-time">' + formatTimeAgo(n.created_at) + '</span>';
                 html += '</div></div>';

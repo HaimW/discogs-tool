@@ -25,6 +25,7 @@
             <a href="#" class="nav-link" data-nav="wantlist">Want List <span id="notif-badge" class="notif-nav-badge" style="display:none;">0</span></a>
             <a href="#" class="nav-link" data-nav="setlists">Setlists</a>
             <a href="#" class="nav-link" data-nav="store">Store</a>
+            <a href="#" class="nav-link" data-nav="stats">Stats</a>
             <a href="#" class="nav-link" data-nav="backup">Backup</a>
             <a href="#" class="nav-link" data-nav="analyzer">Analyzer</a>
         </div>
@@ -100,6 +101,17 @@
             </div>
 
             <div class="np-right">
+                <div class="np-volume">
+                    <button id="np-mute" class="np-btn np-btn-mute" type="button" aria-pressed="false" aria-label="Mute" title="Mute">
+                        <svg class="np-mute-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+                            <path fill="currentColor" d="M4 9h4l5-4v14l-5-4H4z"/>
+                            <path class="np-vol-waves" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10"/>
+                            <path class="np-vol-x" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M16 9.5l5 5M21 9.5l-5 5"/>
+                        </svg>
+                    </button>
+                    <label for="np-volume" class="sr-only">Volume</label>
+                    <input id="np-volume" class="np-volume-slider" type="range" min="0" max="100" step="1" value="100" aria-valuetext="100%">
+                </div>
                 <div class="np-actions">
                     <button id="np-queue"        class="np-btn" title="Queue">&#9776;</button>
                     <button id="np-add-setlist"  class="np-btn" title="Save to setlist">&#9733;</button>
@@ -129,6 +141,7 @@
     <script src="src/visualizer.js"></script>
     <script src="src/video_match.js"></script>
     <script src="src/player.js"></script>
+    <script src="src/volume.js"></script>
     <script src="src/crossfade.js"></script>
     <script src="src/player_state.js"></script>
     <script src="src/search.js"></script>
@@ -147,6 +160,7 @@
     <script src="src/views/tracks.js"></script>
     <script src="src/views/release.js"></script>
     <script src="src/views/analyzer.js"></script>
+    <script src="src/views/stats.js"></script>
     <script src="src/init.js"></script>
     <script src="src/footer_credit.js"></script>
     <script>

@@ -19,14 +19,14 @@ function renderBackup() {
         '<div class="backup-card">' +
         '<div class="backup-card-icon">&#8659;</div>' +
         '<h2 class="backup-card-title">Download full backup</h2>' +
-        '<p class="backup-card-desc">Exports your entire local database — collection, want list, setlists, track metadata, store inventory and API config — to a single JSON file. Everything needed to fully recover if you clear browser data.</p>' +
+        '<p class="backup-card-desc">Exports everything you have entered or built up here — track metadata, setlists, store inventory, max-price alerts, price history, alert history — plus a copy of your collection and want list, to a single JSON file. Your Discogs token is <em>not</em> included: after restoring into a fresh browser, enter it again on Setup.</p>' +
         '<button class="btn btn-primary btn-large"' + act('click', 'exportFullBackup') + '>Download vinyl-backup-&lt;date&gt;.json</button>' +
         '</div>' +
 
         '<div class="backup-card">' +
         '<div class="backup-card-icon">&#8657;</div>' +
         '<h2 class="backup-card-title">Restore from backup</h2>' +
-        '<p class="backup-card-desc">Pick a <code>.json</code> file previously downloaded from this page. Records are <em>merged</em> (not wiped) — existing data is kept, backup data is upserted on top. Safe to run twice.</p>' +
+        '<p class="backup-card-desc">Pick a <code>.json</code> file previously downloaded from this page (any version), or an <code>analysis.json</code> from the desktop analyzer. Records are <em>merged</em> (not wiped) — existing data is kept, backup data is upserted on top. Safe to run twice.</p>' +
         '<button class="btn btn-large"' + act('click', 'backupChooseFile') + '>Choose backup file&hellip;</button>' +
         '<input type="file" id="backup-file-input" accept=".json" style="display:none"' + act('change', 'importBackupFile', [ACT_THIS]) + '>' +
         '</div>' +
@@ -35,64 +35,106 @@ function renderBackup() {
 
         '<div class="backup-legend">' +
         '<h3>What is in the backup?</h3>' +
+        '<p><strong>Authored</strong> &mdash; what you typed or what built up in this browser. Discogs cannot give it back, so this is what the backup is for:</p>' +
         '<ul>' +
-        '<li><strong>Collection</strong> &mdash; all releases, YouTube videos, folders and track lists</li>' +
-        '<li><strong>Want list</strong> &mdash; all wanted releases and their marketplace stats</li>' +
-        '<li><strong>Setlists</strong> &mdash; all playlists with track order and notes</li>' +
         '<li><strong>Track metadata</strong> &mdash; BPM, key, rating, energy, shelf, tags, notes, verified flag</li>' +
+        '<li><strong>Setlists</strong> &mdash; all playlists with track order and notes</li>' +
         '<li><strong>Store</strong> &mdash; serialized inventory items and sale batches</li>' +
-        '<li><strong>Config</strong> &mdash; Discogs API token and username</li>' +
+        '<li><strong>Max-price alerts</strong> &mdash; the max price and currency you set per want</li>' +
+        '<li><strong>Price history</strong> &mdash; marketplace readings recorded over time</li>' +
         '<li><strong>Notifications</strong> &mdash; marketplace alert history</li>' +
+        '<li><strong>Config</strong> &mdash; your Discogs username, crossfade and volume settings (the token is never exported)</li>' +
+        '</ul>' +
+        '<p><strong>Derived</strong> &mdash; copies of what Discogs has, so a restore works offline; a sync would fetch them again:</p>' +
+        '<ul>' +
+        '<li><strong>Collection</strong> &mdash; releases (with your video picks), YouTube videos, folders and track lists</li>' +
+        '<li><strong>Want list</strong> &mdash; wanted releases and their latest marketplace stats</li>' +
         '</ul>' +
         '</div>' +
 
         '</div>'; // .backup-page
 }
 
+// Config keys a backup may carry: settings the person chose. The Discogs token
+// is a credential: it is left out so a backup file is safe to keep in a cloud
+// folder. collection_value is a cached Discogs reading, also left out.
+var EXPORT_CONFIG_KEYS = ['discogs_username', 'crossfade_enabled', 'crossfade_seconds',
+    'player_volume', 'player_muted'];
+
+// Config values a restore checks before writing them; a record that fails is
+// left out, so the setting already in this browser stays.
+var CONFIG_RESTORE_CHECKS = {
+    player_volume: function (v) { return Number.isInteger(v) && v >= 0 && v <= 100; },
+    player_muted: function (v) { return typeof v === 'boolean'; }
+};
+
+// Every store a full backup reads.
+var BACKUP_STORES = ['config', 'releases', 'videos', 'folders', 'tracklist', 'wants',
+    'marketplace_stats', 'track_meta', 'setlists', 'store_items', 'store_batches',
+    'notifications', 'price_history', 'want_alerts'];
+
+// The v3 backup document from the stores' records (`stores` maps a store name
+// to its records). Authored data — which cannot be fetched from Discogs again —
+// is kept apart from derived data. `track_meta` and `collection` stay at their
+// v2 paths because desktop-analyzer reads them there.
+function buildBackupPayload(stores, nowIso) {
+    function all(name) { return stores[name] || []; }
+    return {
+        _version: 3,
+        _app: 'VinylCollectionPlayer',
+        exported_at: nowIso,
+        _contents: {
+            note: 'Authored sections hold what you entered or what built up in this browser; ' +
+                'Discogs cannot return them. Derived sections are copies of Discogs data that a sync ' +
+                'fetches again. track_meta and collection stay at their v2 paths for desktop-analyzer. ' +
+                'The Discogs token is not included.',
+            sections: {
+                'track_meta': 'authored',
+                'authored.setlists': 'authored',
+                'authored.store': 'authored',
+                'authored.price_history': 'authored',
+                'authored.notifications': 'authored',
+                'authored.want_alerts': 'authored',
+                'authored.config': 'authored',
+                'collection': 'derived (releases also carry your video_overrides)',
+                'derived.wants': 'derived',
+                'derived.marketplace_stats': 'derived'
+            },
+            pinned_v2_paths: ['track_meta', 'collection']
+        },
+        track_meta: all('track_meta'),
+        authored: {
+            setlists: all('setlists'),
+            store: { items: all('store_items'), batches: all('store_batches') },
+            price_history: all('price_history'),
+            notifications: all('notifications'),
+            want_alerts: all('want_alerts'),
+            config: all('config').filter(function (c) {
+                return c && EXPORT_CONFIG_KEYS.indexOf(c.key) !== -1;
+            })
+        },
+        collection: {
+            releases: all('releases'),
+            videos: all('videos'),
+            folders: all('folders'),
+            tracklist: all('tracklist')
+        },
+        derived: {
+            wants: all('wants'),
+            marketplace_stats: all('marketplace_stats')
+        }
+    };
+}
+
 function exportFullBackup() {
-    Promise.all([
-        dbGetAll('config'),
-        dbGetAll('releases'),
-        dbGetAll('videos'),
-        dbGetAll('folders'),
-        dbGetAll('tracklist'),
-        dbGetAll('wants'),
-        dbGetAll('marketplace_stats'),
-        dbGetAll('track_meta'),
-        dbGetAll('setlists'),
-        dbGetAll('store_items'),
-        dbGetAll('store_batches'),
-        dbGetAll('notifications'),
-        dbGetAll('price_history')
-    ]).then(function (r) {
-        var payload = {
-            _version: 2,
-            _app: 'VinylCollectionPlayer',
-            exported_at: new Date().toISOString(),
-            config: r[0],
-            collection: {
-                releases: r[1],
-                videos: r[2],
-                folders: r[3],
-                tracklist: r[4]
-            },
-            wantlist: {
-                wants: r[5],
-                marketplace_stats: r[6],
-                // Accrued over time from marketplace polls; cannot be
-                // re-fetched from Discogs, so it travels with the backup.
-                price_history: r[12]
-            },
-            track_meta: r[7],
-            setlists: r[8],
-            store: {
-                items: r[9],
-                batches: r[10]
-            },
-            notifications: r[11]
-        };
-        var date = new Date().toISOString().slice(0, 10);
-        downloadBlob('vinyl-backup-' + date + '.json', 'application/json', JSON.stringify(payload, null, 2));
+    return Promise.all(BACKUP_STORES.map(function (name) { return dbGetAll(name); })).then(function (r) {
+        var stores = {};
+        BACKUP_STORES.forEach(function (name, i) { stores[name] = r[i]; });
+        var now = new Date().toISOString();
+        var payload = buildBackupPayload(stores, now);
+        downloadBlob('vinyl-backup-' + now.slice(0, 10) + '.json', 'application/json', JSON.stringify(payload, null, 2));
+    }).catch(function (err) {
+        showToast('Backup failed: ' + err.message, 'error');
     });
 }
 
@@ -103,9 +145,16 @@ function _bulkPut(storeName, records) {
         return new Promise(function (resolve, reject) {
             var tx = db.transaction(storeName, 'readwrite');
             var os = tx.objectStore(storeName);
-            records.forEach(function (rec) { os.put(rec); });
             tx.oncomplete = function () { resolve(records.length); };
             tx.onerror = function (e) { reject(e.target.error); };
+            tx.onabort = function () { reject(tx.error || new Error('Writing ' + storeName + ' was aborted')); };
+            try {
+                records.forEach(function (rec) { os.put(rec); });
+            } catch (err) {
+                // A put that throws (bad key) must not leave half the records written.
+                try { tx.abort(); } catch (e) { /* already finished */ }
+                reject(err);
+            }
         });
     });
 }
@@ -133,59 +182,216 @@ function backupChooseFile() {
     document.getElementById('backup-file-input').click();
 }
 
+// Any backup file — v1, v2, v3, or desktop-analyzer's analysis.json (a v2-
+// shaped file carrying only track_meta) — as flat record lists per store, or
+// null when it is not one of ours. Sections are found by path, not by
+// `_version`, so a file missing a section simply restores nothing for it.
+// The key each store's records are written under (src/db.js keyPaths). Stores
+// with autoIncrement are listed as optional: a record without an id gets a new
+// one, so only a present-but-invalid id is a reason to drop it.
+var BACKUP_STORE_KEYS = {
+    config: { path: 'key' },
+    releases: { path: 'id' }, folders: { path: 'id' }, tracklist: { path: 'id' },
+    track_meta: { path: 'id' }, wants: { path: 'id' }, marketplace_stats: { path: 'id' },
+    store_items: { path: 'id' }, price_history: { path: 'id' }, want_alerts: { path: 'id' },
+    videos: { path: 'id', optional: true }, setlists: { path: 'id', optional: true },
+    store_batches: { path: 'id', optional: true }, notifications: { path: 'id', optional: true }
+};
+
+function _validBackupKey(v) {
+    return typeof v === 'string' || (typeof v === 'number' && Number.isFinite(v));
+}
+
+function _normalizeBackup(raw) {
+    if (!raw || typeof raw !== 'object' || raw._app !== 'VinylCollectionPlayer') return null;
+    function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+    function rows(v) {
+        return Array.isArray(v) ? v.filter(function (r) { return r && typeof r === 'object' && !Array.isArray(r); }) : [];
+    }
+    function pick(a, b) { return Array.isArray(a) ? a : b; }
+    var authored = obj(raw.authored);
+    var derived = obj(raw.derived);
+    var col = obj(raw.collection);
+    var wl = obj(raw.wantlist);                   // v1/v2
+    var st = obj(authored.store || raw.store);   // v3 / v1-v2
+    // Records a put would reject (no key, or a key IndexedDB cannot use).
+    function keyed(store, v) {
+        var k = BACKUP_STORE_KEYS[store];
+        return rows(v).filter(function (r) {
+            var key = r[k.path];
+            if (key === undefined && k.optional) return true;
+            return _validBackupKey(key);
+        });
+    }
+    return {
+        version: typeof raw._version === 'number' ? raw._version : 1,
+        config: keyed('config', pick(authored.config, raw.config)),
+        track_meta: keyed('track_meta', raw.track_meta),
+        setlists: keyed('setlists', pick(authored.setlists, raw.setlists)),
+        store_items: keyed('store_items', st.items),
+        store_batches: keyed('store_batches', st.batches),
+        price_history: keyed('price_history', pick(authored.price_history, wl.price_history)),
+        notifications: keyed('notifications', pick(authored.notifications, raw.notifications)),
+        want_alerts: keyed('want_alerts', pick(authored.want_alerts, raw.want_alerts)),
+        releases: keyed('releases', col.releases),
+        videos: keyed('videos', col.videos),
+        folders: keyed('folders', col.folders),
+        tracklist: keyed('tracklist', col.tracklist),
+        wants: keyed('wants', pick(derived.wants, wl.wants)),
+        marketplace_stats: keyed('marketplace_stats', pick(derived.marketplace_stats, wl.marketplace_stats))
+    };
+}
+
+// Which config records to write. A restore never repoints an existing login:
+// - a token from an older backup is only used when this browser has none;
+// - the file's username goes with the file's token when that is restored;
+// - otherwise the file's username is used only when this browser has neither a
+//   token nor a username (a fresh browser), and the local one is kept.
+// tokenOutcome: null (the file carried none), 'restored' or 'kept'.
+function _configToRestore(records, localToken, localUsername) {
+    var token = null;
+    var username = null;
+    var rest = records.filter(function (c) {
+        var check = Object.prototype.hasOwnProperty.call(CONFIG_RESTORE_CHECKS, c.key) && CONFIG_RESTORE_CHECKS[c.key];
+        if (check && !check(c.value)) return false;
+        if (c.key === 'discogs_username') {
+            if (c.value) username = c;
+            return false;
+        }
+        if (c.key !== 'discogs_token') return true;
+        if (c.value) token = c;
+        return false;
+    });
+    var tokenOutcome = !token ? null : localToken ? 'kept' : 'restored';
+    if (tokenOutcome === 'restored') rest.push(token);
+    var takeUsername = tokenOutcome === 'restored' || (!localToken && !localUsername);
+    if (username && takeUsername) rest.push(username);
+    return { records: rest, tokenOutcome: tokenOutcome };
+}
+
+// Fields only this browser fills in (the person's video picks, details from
+// the per-release fetch). A backup record without them does not erase them.
+var RELEASE_LOCAL_FIELDS = ['video_overrides', 'country', 'community_have', 'community_want', 'community_fetched_at'];
+var RELEASE_COMMUNITY_FIELDS = ['community_have', 'community_want', 'community_fetched_at'];
+
+function _plainObject(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : null; }
+
+// Backup releases laid over the local ones, field by field.
+function _mergeReleases(backupRecords, localRecords) {
+    var local = {};
+    localRecords.forEach(function (r) { local[r.id] = r; });
+    return backupRecords.map(function (rec) {
+        var mine = local[rec.id];
+        if (!mine) return rec;
+        var merged = Object.assign({}, mine, rec);
+        RELEASE_LOCAL_FIELDS.forEach(function (f) {
+            if (merged[f] == null && mine[f] != null) merged[f] = mine[f];
+        });
+        // Community counts are a reading at a time: the newer reading wins.
+        var mineAt = dateMs(mine.community_fetched_at);
+        var fileAt = dateMs(rec.community_fetched_at);
+        if (mineAt !== null && (fileAt === null || mineAt > fileAt)) {
+            RELEASE_COMMUNITY_FIELDS.forEach(function (f) { merged[f] = mine[f]; });
+        }
+        // Video picks from both, the ones made in this browser winning.
+        var fileVo = _plainObject(rec.video_overrides);
+        var mineVo = _plainObject(mine.video_overrides);
+        if (fileVo || mineVo) merged.video_overrides = Object.assign({}, fileVo, mineVo);
+        return merged;
+    });
+}
+
+// Writes a normalized backup (see _normalizeBackup) into the stores. Resolves
+// to { counts: {store: n}, tokenOutcome }.
+async function restoreBackup(b) {
+    if (_syncRunning) throw new Error('a sync is running. Try again when it has finished.');
+    var localToken = await dbGet('config', 'discogs_token');
+    var localUsername = await dbGet('config', 'discogs_username');
+    var cfg = _configToRestore(b.config, localToken && localToken.value, localUsername && localUsername.value);
+    var releases = b.releases.length ? _mergeReleases(b.releases, await dbGetAll('releases')) : [];
+
+    var names = ['config', 'track_meta', 'setlists', 'releases', 'videos', 'folders', 'tracklist',
+        'wants', 'marketplace_stats', 'store_items', 'store_batches', 'notifications', 'price_history'];
+    var results = await Promise.all([
+        _bulkPut('config', cfg.records),
+        _bulkPut('track_meta', b.track_meta),
+        _bulkPut('setlists', b.setlists),
+        _bulkPut('releases', releases),
+        _bulkPut('videos', b.videos),
+        _bulkPut('folders', b.folders),
+        _bulkPut('tracklist', b.tracklist),
+        _bulkPut('wants', b.wants),
+        _restoreMarketplaceStats(b.marketplace_stats),
+        _bulkPut('store_items', b.store_items),
+        _bulkPut('store_batches', b.store_batches),
+        _bulkPut('notifications', b.notifications),
+        _bulkPut('price_history', b.price_history)
+    ]);
+    var counts = {};
+    names.forEach(function (n, i) { counts[n] = results[i]; });
+
+    // After the wants, so an alert for a want neither here nor in the file
+    // (an orphan) is dropped rather than kept with nothing to watch.
+    var wantIds = {};
+    (await dbGetAll('wants')).forEach(function (w) { wantIds[w.id] = true; });
+    counts.want_alerts = await _bulkPut('want_alerts', b.want_alerts.filter(function (a) { return wantIds[a.id]; }));
+
+    return { counts: counts, tokenOutcome: cfg.tokenOutcome };
+}
+
+// The toast after a restore.
+function _restoreMessage(version, counts, tokenOutcome) {
+    function n(count, one, many) { return count + ' ' + (count === 1 ? one : many); }
+    var parts = [];
+    if (counts.releases)          parts.push(counts.releases + ' releases');
+    if (counts.videos)            parts.push(counts.videos + ' videos');
+    if (counts.wants)             parts.push(counts.wants + ' want list items');
+    if (counts.setlists)          parts.push(n(counts.setlists, 'setlist', 'setlists'));
+    if (counts.track_meta)        parts.push(n(counts.track_meta, 'track metadata record', 'track metadata records'));
+    if (counts.store_items)       parts.push(n(counts.store_items, 'store item', 'store items'));
+    if (counts.store_batches)     parts.push(n(counts.store_batches, 'store batch', 'store batches'));
+    if (counts.price_history)     parts.push(n(counts.price_history, 'price reading', 'price readings'));
+    if (counts.want_alerts)       parts.push(n(counts.want_alerts, 'max-price alert', 'max-price alerts'));
+    var msg = 'Restored' + (version > 1 ? ' (v' + version + ')' : '') + ': ' +
+        (parts.length ? parts.join(', ') : 'nothing to restore');
+    if (tokenOutcome === 'restored') msg += '. Discogs token restored from the file.';
+    else if (tokenOutcome === 'kept') msg += '. Kept your current Discogs token.';
+    return msg;
+}
+
+var RESTORE_WHILE_SYNCING = 'A sync is running. Restore when it has finished.';
+
 function importBackupFile(input) {
     var file = input.files[0];
     if (!file) return;
     input.value = '';
+    if (_syncRunning) {
+        showToast(RESTORE_WHILE_SYNCING, 'error');
+        return;
+    }
     var reader = new FileReader();
     reader.onload = function (e) {
-        var backup;
+        var raw;
         try {
-            backup = JSON.parse(e.target.result);
+            raw = JSON.parse(e.target.result);
         } catch (err) {
             showToast('Could not read the backup file: ' + err.message, 'error');
             return;
         }
-        if (!backup || backup._app !== 'VinylCollectionPlayer') {
+        var backup = _normalizeBackup(raw);
+        if (!backup) {
             showToast('This does not look like a Vinyl Collection Player backup file.', 'error');
+            return;
+        }
+        if (_syncRunning) {  // a sync started while the file was read
+            showToast(RESTORE_WHILE_SYNCING, 'error');
             return;
         }
 
         showSyncBanner('Restoring backup…');
-
-        var v = backup._version || 1;
-        var col = backup.collection || {};
-        var wl  = backup.wantlist  || {};
-        var st  = backup.store     || {};
-
-        Promise.all([
-            _bulkPut('config',            backup.config          || []),
-            _bulkPut('track_meta',        backup.track_meta      || []),
-            _bulkPut('setlists',          backup.setlists        || []),
-            _bulkPut('releases',          col.releases           || []),
-            _bulkPut('videos',            col.videos             || []),
-            _bulkPut('folders',           col.folders            || []),
-            _bulkPut('tracklist',         col.tracklist          || []),
-            _bulkPut('wants',             wl.wants               || []),
-            _restoreMarketplaceStats(wl.marketplace_stats || []),
-            _bulkPut('store_items',       st.items               || []),
-            _bulkPut('store_batches',     st.batches             || []),
-            _bulkPut('notifications',     backup.notifications   || []),
-            _bulkPut('price_history',     wl.price_history       || [])
-        ]).then(function (counts) {
-            var parts = [];
-            if (counts[3])  parts.push(counts[3]  + ' releases');
-            if (counts[4])  parts.push(counts[4]  + ' videos');
-            if (counts[7])  parts.push(counts[7]  + ' want list items');
-            if (counts[2])  parts.push(counts[2]  + ' setlist' + (counts[2] === 1 ? '' : 's'));
-            if (counts[1])  parts.push(counts[1]  + ' track metadata record' + (counts[1] === 1 ? '' : 's'));
-            if (counts[9])  parts.push(counts[9]  + ' store item' + (counts[9] === 1 ? '' : 's'));
-            if (counts[10]) parts.push(counts[10] + ' store batch' + (counts[10] === 1 ? '' : 'es'));
-            if (counts[12]) parts.push(counts[12] + ' price reading' + (counts[12] === 1 ? '' : 's'));
-            var msg = 'Restored' + (v > 1 ? ' (v' + v + ')' : '') + ': ' +
-                (parts.length ? parts.join(', ') : 'nothing to restore');
+        restoreBackup(backup).then(function (res) {
             hideSyncBanner();
-            showToast(msg, 'success', 6000);
+            showToast(_restoreMessage(backup.version, res.counts, res.tokenOutcome), 'success', 6000);
             renderCurrentView();
         }).catch(function (err) {
             hideSyncBanner();

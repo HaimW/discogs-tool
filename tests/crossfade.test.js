@@ -9,7 +9,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SRC = fs.readFileSync(path.join(__dirname, '..', 'src', 'crossfade.js'), 'utf8');
+const read = f => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
+// crossfade.js sets volumes through src/volume.js (F15), loaded first as in index.html.
+const FILES = ['volume.js', 'crossfade.js'];
 
 function load({ duration, currentTime, cfSeconds }) {
     const intervals = [];
@@ -23,7 +25,7 @@ function load({ duration, currentTime, cfSeconds }) {
         clearInterval() {},
     };
     vm.createContext(ctx);
-    vm.runInContext(SRC, ctx, { filename: 'src/crossfade.js' });
+    for (const f of FILES) vm.runInContext(read(f), ctx, { filename: 'src/' + f });
     return { ctx, intervals };
 }
 

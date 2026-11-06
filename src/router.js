@@ -38,6 +38,7 @@ function renderCurrentView() {
             case 'store': renderStore(); break;
             case 'backup': renderBackup(); break;
             case 'analyzer': renderAnalyzer(); break;
+            case 'stats': renderStats(); break;
             default: renderCollection(); break;
         }
     });

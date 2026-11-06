@@ -16,6 +16,7 @@ A **pure browser-based Discogs companion** for DJs and collectors. Sync your col
 
 - [Getting Started](#getting-started)
 - [Running Locally](#running-locally)
+- [Development and Testing](#development-and-testing)
 - [Features](#features)
   - [1. Discogs Collection Sync](#1-discogs-collection-sync)
   - [2. Collection Browsing](#2-collection-browsing)
@@ -30,6 +31,7 @@ A **pure browser-based Discogs companion** for DJs and collectors. Sync your col
   - [11. Marketplace Monitoring](#11-marketplace-monitoring)
   - [12. Store & Inventory](#12-store--inventory)
   - [13. Backup & Restore](#13-backup--restore)
+  - [14. Stats](#14-stats)
 - [Data Storage](#data-storage)
 - [Project Structure](#project-structure)
 - [Tech Stack](#tech-stack)
@@ -61,16 +63,46 @@ Then open [http://localhost:5000](http://localhost:5000).
 
 No build step or dependencies required to run the app.
 
-### Checks (for development)
+---
 
-Linting and tests need Node 20 or newer:
+## Development and Testing
+
+The checks need Node 20 or newer. None of this is needed to run the app.
 
 ```bash
-npm install      # ESLint, once
-npm run lint     # ESLint over app.js, src/ and tests/
-npm test         # unit tests (node --test tests/*.test.js)
-npm run check    # both; GitHub Actions runs the same on every push
+npm install          # dev tools (ESLint, Playwright), once
+npm run lint         # ESLint over app.js, src/ and tests/
+npm test             # unit tests (node --test tests/*.test.js)
+npm run check        # lint + unit tests
+npm run test:e2e     # browser smoke tests (Playwright, tests/e2e/)
 ```
+
+**Browser smoke tests.** `npm run test:e2e` starts a local static server
+(`tests/e2e/server.js`) and runs the real app in Chromium. Every request
+that does not go to that server is blocked, except `api.discogs.com`, which
+is answered with fake data (`tests/e2e/fixtures.js`). No Discogs token or
+network access is needed. The tests click through every view in the top
+navigation and check the setup token check, toasts and the lazy background
+video.
+
+The first time, download the Chromium build that the pinned
+`@playwright/test` (1.62.1) expects:
+
+```bash
+npx playwright install chromium
+```
+
+To use a Chromium or Chrome binary that is already on disk instead:
+
+```bash
+PW_CHROMIUM_PATH=/path/to/chrome npm run test:e2e
+```
+
+`npm test` does not run the browser tests. GitHub Actions
+(`.github/workflows/web-app.yml`) runs lint + unit tests and the browser
+tests as two parallel jobs on every push and pull request (changes that
+touch only docs or `desktop-analyzer/` are skipped); on a failure the
+Playwright report is attached to the run.
 
 Markup is built as strings, so clicks and other events are wired with
 `act()` from `src/actions.js` rather than inline `onclick="…"` handlers:
@@ -195,6 +227,17 @@ Sync and browse your Discogs want list with marketplace monitoring.
 | Check Availability | Pull marketplace stats for all want list items |
 | Export CSV | Download full want list as a CSV file |
 | Dig Deeper | Analyse which genres, styles, and artists are in your want list but not yet in your collection — click any pill to filter |
+| Max-price alert (bell button on a card) | Set the most you would pay for this release; see below |
+
+**Max-price alerts:**
+
+1. Click the **bell** button on a want-list card.
+2. Enter a price (`25` or `25.50`) and pick a currency, then click **Save** (or press Enter).
+3. The card shows "Alert at or under EUR 25.00". Click the bell again to change the price or **Clear** it.
+
+When a marketplace check finds copies for sale with a lowest price at or under your max, you get a notification. You get it once; it fires again only after the price has gone back above the max or nothing has been for sale. A for-sale alert for a release whose lowest price is above your max is not sent.
+
+> **Currency:** Discogs reports prices in the currency set in your Discogs account, and the app does not convert. The max is compared only when its currency matches the one Discogs lists the release in. If they differ, the card shows a ⚠ "listed in …" marker, no price alert fires, and you get the plain for-sale alert instead. The currency picker starts on the currency Discogs last reported for that release (USD if it has not been checked).
 
 ---
 
@@ -205,6 +248,7 @@ An embedded YouTube player drives all playback. A **Now Playing bar** stays fixe
 **Now Playing bar contains:**
 - Cover thumbnail, track title, artist name
 - Play/Pause, Previous, Next buttons
+- Mute button and volume slider (0–100)
 - Crossfade toggle and duration input
 - Suggestions button (harmonic mixing)
 - Queue panel button
@@ -226,6 +270,16 @@ An embedded YouTube player drives all playback. A **Now Playing bar** stays fixe
 - Remove any track from the queue
 - Click a track to jump to it
 
+**Volume:**
+- Drag the slider, or focus it and use the arrow keys, Home (0) and End (100). There are no global keyboard shortcuts.
+- The mute button silences playback and keeps the slider where it is; unmuting returns to that volume. Moving the slider while muted unmutes.
+- Volume and mute are remembered between visits (config keys `player_volume` and `player_muted`) and are included in backups. The default is 100, unmuted.
+- Every new track starts at the chosen volume.
+- On narrow screens (480 px wide or less) the slider is hidden and only the mute button stays.
+- A volume restored from a backup takes effect on the next page load, the same as crossfade settings.
+
+> **Limitation:** volume is set only by the app's slider and mute button. On iOS the page cannot set volume; use the device buttons.
+
 ---
 
 ### 6. Crossfade
@@ -238,8 +292,9 @@ Automatic volume crossfade between tracks for smooth DJ-style transitions.
 
 **How it works:**
 - A hidden second player silently preloads the next track.
-- When the current track reaches `[fade duration + 2]` seconds from its end, the crossfade starts.
-- Player 1 fades from 100% → 0% volume while Player 2 fades 0% → 100%.
+- The crossfade starts when the time left in the current track equals the fade length. The fade length is your chosen duration, but at most a third of the current track (a 9 s fade on a 10 s track lasts about 3.3 s). Tracks shorter than 3 seconds get no fade.
+- Player 1 fades from your [volume](#5-youtube-playback) to 0 while Player 2 fades from 0 to your volume.
+- Moving the volume slider or muting during a fade rescales both players at the current point of the fade.
 - After handoff, the next-next track is preloaded for continuous gapless play.
 - Crossfade aborts cleanly if the track ends unexpectedly.
 
@@ -264,6 +319,8 @@ Get a ranked list of compatible next tracks based on key, BPM, and genre.
 | Track rating bonus | +2 per star |
 
 **Camelot wheel compatibility:** Same key, one step clockwise, one step counter-clockwise, or the relative major/minor (A↔B same number).
+
+**Relative key:** wherever a key is shown (release page, Tracks view, setlist detail, Suggestions panel), it ends with its relative key, e.g. `8A … rel 8B`. Hover for the full name ("Relative key 8B (C major)"); screen readers read the full name. The Suggestions panel's "Current" line and the centre of the Camelot wheel in the metadata editor show it too.
 
 **Panel shows:** Top 20 suggestions with score, BPM, key, artist, title. For each suggestion:
 - **Play Next** — inserts it immediately after the current track
@@ -372,7 +429,7 @@ Monitor Discogs marketplace listings for items on your want list.
   - **Buy** link goes directly to the Discogs marketplace listing
   - **Clear All** removes all notifications
 
-New listings trigger a notification only when a previously-unavailable item becomes available (0 → 1+ copies).
+New listings trigger a notification only when a previously-unavailable item becomes available (0 → 1+ copies), or when the lowest price drops to a [max price](#4-want-list) you set. Such alerts also show your max.
 
 ---
 
@@ -414,20 +471,62 @@ Export and import your complete app data to protect against browser data loss or
 
 **What the backup includes:**
 
-- Discogs credentials (token and username)
-- Releases, videos, folders, physical tracklists
-- Want list and marketplace stats
-- Track metadata (BPM, Key, Rating, Energy, Shelf, Tags, Notes)
+The file (format version 3) labels each section as *authored* or *derived*.
+
+*Authored* — what you typed, or what built up in this browser over time. Discogs cannot give it back; this is what the backup is for:
+
+- Track metadata (BPM, Key, Rating, Energy, Shelf, Tags, Notes, Verified)
 - Setlists with track order and notes
 - Store inventory items and batches
-- Notifications and alerts
+- Max-price alerts
+- Price history (marketplace readings recorded over time)
+- Notifications (marketplace alert history)
+- Your Discogs username, crossfade settings, and player volume and mute
+
+*Derived* — copies of Discogs data, so a restore works without a sync; a sync would fetch them again:
+
+- Releases (with your video picks), videos, folders, physical tracklists
+- Want list and its latest marketplace stats
+
+**Not included:** your Discogs token, and the collection value from the Stats page. A backup file holds no credential, so it is safe to keep in a cloud folder. After restoring into a fresh browser, go to **Setup** and enter your token again.
+
+A `_contents` entry at the top of the file lists every section and its label. Track metadata and the collection stay where version 2 files had them, because the desktop analyzer reads them there.
 
 **Restore:**
-1. Click **Choose File** and select a backup JSON.
-2. Click **Restore** — data is merged into the current database (existing data is not wiped).
-3. A summary reports how many items were restored by type.
+1. Click **Choose backup file…** and select a backup JSON. The restore starts as soon as you pick the file.
+2. Data is merged into the current database (existing data is not wiped). Running it twice is safe.
+3. A message reports how many items were restored by type.
+
+What restore accepts and how it merges:
+
+- Backups from any version of this page (v1, v2, v3), and the desktop analyzer's `analysis.json` (restores track metadata only).
+- Releases are merged field by field: your video picks in this browser win over the file's, fetched details are kept when the file lacks them, and newer have/want counts are kept. Other records from the file replace the local record with the same ID.
+- Marketplace stats already in this browser are kept; the file's fill in only what is missing, and do not trigger alerts by themselves.
+- Max-price alerts for releases that are in neither your want list nor the file are dropped.
+- Older backups (v2 and earlier) contain your token. It is restored only when this browser has no token; otherwise your current token is kept. The message says which happened.
+- The file's username is used only together with its token, or when this browser has no login at all, so a restore never pairs one account's token with another account's username.
+- Invalid volume or mute values in the file are skipped and the current setting is kept. Volume must be a whole number from 0 to 100; mute must be `true` or `false`.
+- Restore is refused while a sync or collectability fetch is running.
 
 > **Important:** All data is stored in your browser's IndexedDB. Clearing browser site data will delete everything. Regular backups are strongly recommended.
+
+---
+
+### 14. Stats
+
+The **Stats** view (top navigation) summarises your collection. It reads the releases stored in this browser, so sync your collection first.
+
+**Collection value:**
+- Click **Refresh value** to fetch Discogs' estimate (minimum, median, maximum), based on recent marketplace sales. This takes one request and needs your token and username.
+- The figures are shown exactly as Discogs formats them, in the currency of your Discogs account, with the time they were fetched. They are not refreshed automatically, and they are not included in backups.
+
+**Collectability:**
+- How many Discogs users have and want each of your releases, with the totals, a **Most wanted** list and a **Highest want/have ratio** list (releases with fewer than 5 wants are left out of the ratio list). Click a release to open it.
+- A collection sync records these counts while it fetches release details. Releases synced before this feature have none; the **Fetch collectability (N missing, ~M min)** button fills them in.
+- The backfill costs one Discogs request per release. At the authenticated limit of 60 requests a minute, 1,000 releases take about 20 minutes. Collection sync is unavailable while it runs.
+- Click **Stop** to end it early. Every fetched release is saved as it arrives, so the next run continues with the ones still missing. It keeps running if you switch to another view. After three failed requests in a row it stops by itself.
+
+**Breakdowns:** bar tables of how many releases fall under each genre, style, decade, country and format, with each one's share of the collection. Decades are all listed, oldest first; for the others the largest 10 are listed and the rest grouped as **Other**, and releases without a value as **Unknown**. A release with several genres, styles or formats counts in each, so those shares can add up to more than 100%. Country arrives with the background video sync; until then a release counts as Unknown.
 
 ---
 
@@ -449,6 +548,10 @@ All data is stored locally in **IndexedDB** — nothing is sent to any custom ba
 | `store_items` | Serialised inventory records |
 | `store_batches` | Inventory batch groupings |
 | `notifications` | Marketplace alerts |
+| `price_history` | Marketplace readings recorded over time |
+| `want_alerts` | Max-price alerts per want (price and currency) |
+
+The `config` store also keeps the last fetched collection value (`collection_value`).
 
 Session state (currently playing track) is stored in `sessionStorage` so playback context survives page refreshes.
 
@@ -470,7 +573,9 @@ discogs-tool/
     ├── player.js       — YouTube IFrame player wrapper
     ├── player_state.js — Playback state (queue, current track)
     ├── crossfade.js    — Crossfade engine (dual player)
+    ├── volume.js       — Master volume + mute (shared by both players and the crossfade)
     ├── harmonic.js     — Harmonic mixing and suggestion scoring
+    ├── camelot.js      — Camelot key chips, relative key, key wheel
     ├── visualizer.js   — Canvas visualizer (8 modes)
     ├── search.js       — Search and filter utilities
     ├── setlists.js     — Setlist CRUD and playback
@@ -490,8 +595,11 @@ discogs-tool/
         ├── wantlist.js     — Want List view
         ├── wantlist_sync.js — Want list sync logic
         ├── release.js      — Release detail page
+        ├── stats.js        — Stats view (value, collectability, breakdowns)
         └── store.js        — Store & inventory view
 ```
+
+Tests live in `tests/` (unit tests, `*.test.js`) and `tests/e2e/` (browser smoke tests, configured in `playwright.config.js`).
 
 ---
 
@@ -505,7 +613,7 @@ discogs-tool/
 | Video playback | YouTube IFrame API |
 | Hosting | GitHub Pages (static) |
 
-No frameworks, no bundler, no server. ESLint and Node's built-in test runner are the only development tools.
+No frameworks, no bundler, no server. ESLint, Node's built-in test runner and Playwright are the only development tools.
 
 ---
 

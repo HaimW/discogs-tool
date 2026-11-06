@@ -10,3 +10,9 @@ split_app.py
 
 # npm
 /node_modules/
+
+# Playwright (npm run test:e2e)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

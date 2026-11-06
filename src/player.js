@@ -30,6 +30,7 @@ function onYouTubeIframeAPIReady() {
         events: {
             onReady: function () {
                 playerReady = true;
+                _initPlayerVolume(player);
                 _restorePlayerState();
             },
             onStateChange: onPlayerStateChange,
@@ -41,7 +42,7 @@ function onYouTubeIframeAPIReady() {
         width: '1',
         playerVars: { autoplay: 0, controls: 0, rel: 0, enablejsapi: 1, origin: window.location.origin, playsinline: 1, cc_load_policy: 0 },
         events: {
-            onReady: function () { player2Ready = true; },
+            onReady: function () { player2Ready = true; _initPlayerVolume(player2); },
             onStateChange: onPlayer2StateChange,
             onError: function () { _abortCrossfade(); },
         },
@@ -67,17 +68,26 @@ function onPlayerStateChange(event) {
     } else if (event.data === YT.PlayerState.PLAYING) {
         // Complete crossfade handoff: player1 is now playing the new track
         if (_cfState === 'switching') {
-            player.setVolume(100);
-            try { player2.pauseVideo(); player2.setVolume(0); } catch (e) {}
+            try { player2.pauseVideo(); } catch (e) {}
             _cfState = 'idle';
             _cfPreloadedIndex = -1;
+            // Player 1 takes over at the master volume; player 2 goes silent.
+            _applyVolumeNow();
             isPlaying = true;
+            // showNowPlaying() reset and stopped the time bar for the new
+            // track; restart it here, as the non-crossfade path below does (M6).
+            startViz();
+            _startProgressUpdate();
             updatePlayPauseBtn();
             _savePlayerState();
             if (cfEnabled) setTimeout(_preloadNextTrack, 800);
             if (document.getElementById('queue-panel')) _renderQueuePanel();
             return;
         }
+        // YouTube may not carry the volume over a new video (src/volume.js):
+        // set it again now that this one plays. Mid-fade this keeps the fade's
+        // shares.
+        _applyVolumeNow();
         isPlaying = true;
         startViz();
         _startProgressUpdate();
@@ -179,7 +189,7 @@ function loadFromQueue(index) {
     var item = currentQueue[index];
     if (!item || !playerReady) return;
     if (_cfState !== 'idle') _abortCrossfade();
-    player.setVolume(100);
+    _applyVolumeNow();
     player.loadVideoById(item.youtubeId);
     showNowPlaying(item.title, item.artist, item.cover);
     isPlaying = true;

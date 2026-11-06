@@ -192,7 +192,7 @@ function renderTracks() {
 
                 html += '<span class="track-badges">';
                 if (row.bpm != null) html += '<span class="track-badge badge-bpm">' + row.bpm + '</span>';
-                if (row.key) html += '<span class="track-badge badge-key">' + escHtml(row.key) + '</span>';
+                if (row.key) html += '<span class="track-badge badge-key">' + escHtml(row.key) + camelotRelativeHtml(row.key) + '</span>';
                 if (row.rating) html += '<span class="track-badge badge-rating">' + ratingStars(row.rating) + '</span>';
                 if (row.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(row.shelf) + '</span>';
                 html += '</span>';
