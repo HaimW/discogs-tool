@@ -82,8 +82,8 @@ npm run test:e2e     # browser smoke tests (Playwright, tests/e2e/)
 that does not go to that server is blocked, except `api.discogs.com`, which
 is answered with fake data (`tests/e2e/fixtures.js`). No Discogs token or
 network access is needed. The tests click through every view in the top
-navigation and check the setup token check, toasts and the lazy background
-video.
+navigation and check the setup token check, toasts, the lazy background
+video, and the loading, empty and error states.
 
 The first time, download the Chromium build that the pinned
 `@playwright/test` (1.62.1) expects:
@@ -111,6 +111,16 @@ as escaped JSON data and are never run as code. A test fails if an inline
 handler comes back or an action names a function that does not exist.
 User-facing messages use `showToast(message, 'info' | 'success' | 'error')`
 from `src/toast.js`, not `alert()`.
+
+Views are drawn through the router (`renderCurrentView()` in `src/router.js`),
+which runs each one through `runViewRender()` in `src/view_state.js`. A view's
+render function returns its promise and starts with
+`var tok = startViewRender();`, then draws only if
+`viewRenderIsCurrent(tok)`, so a slow older render cannot overwrite a newer
+one. A view that takes longer than 250 ms shows "Loading …" (announced to
+screen readers; no spinning with reduced motion). A view that throws or
+rejects is logged with `console.error` and replaced by a message with a
+**Try again** button.
 
 ---
 
@@ -269,6 +279,8 @@ An embedded YouTube player drives all playback. A **Now Playing bar** stays fixe
 - Shows the current queue in order
 - Remove any track from the queue
 - Click a track to jump to it
+- Each row shows the track's BPM (rounded) and its key as a coloured Camelot chip, when its metadata has them (from the analyzer or entered by hand); a dimmed number or dashed chip is an analyzer estimate. Tracks without metadata show nothing there.
+- The list stays where you scrolled it when you play or remove a track, and a dragged panel stays where you dropped it. It scrolls by itself only when it opens, or when playback moves on (track ended, Next/Prev, an unplayable video skipped) to a track that is out of view.
 
 **Volume:**
 - Drag the slider, or focus it and use the arrow keys, Home (0) and End (100). There are no global keyboard shortcuts.
@@ -555,6 +567,13 @@ The `config` store also keeps the last fetched collection value (`collection_val
 
 Session state (currently playing track) is stored in `sessionStorage` so playback context survives page refreshes.
 
+If the browser will not open the database (private browsing that blocks
+storage, site data turned off, a newer saved version than the page, or no
+IndexedDB at all), the app says which and what to do, with a **Try again**
+button, instead of showing a blank page. While another open tab still holds
+an older version, a notice asks you to close it and the page carries on by
+itself once it is closed.
+
 ---
 
 ## Project Structure
@@ -570,6 +589,7 @@ discogs-tool/
     ├── config.js       — App configuration and constants
     ├── init.js         — Startup and credential checks
     ├── router.js       — Client-side routing
+    ├── view_state.js   — Shared loading / error states for views
     ├── player.js       — YouTube IFrame player wrapper
     ├── player_state.js — Playback state (queue, current track)
     ├── crossfade.js    — Crossfade engine (dual player)
@@ -584,6 +604,7 @@ discogs-tool/
     ├── meta.js         — Track metadata read/write
     ├── meta_editor.js  — Inline metadata editor UI
     ├── queue.js        — Queue management
+    ├── queue_meta.js   — BPM / key for the queue rows
     ├── utils.js        — Shared helpers (escaping, dates, pagination)
     ├── actions.js      — Delegated event actions: act() instead of inline handlers
     ├── toast.js        — Non-blocking messages: showToast()

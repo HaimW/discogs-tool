@@ -3,11 +3,54 @@
 var DB_NAME = 'VinylCollectionPlayer';
 var DB_VERSION = 10;
 var _db = null;
+var _dbOpening = null;   // the open in progress, shared by every caller
+var _dbBlockedToast = null;
+
+// An Error for a database that would not open (P6), with a message that says
+// why in plain words and what to do. The browser's own error is kept as
+// `cause` and its name as `dbErrorName`. The router's error screen shows the
+// message (src/view_state.js).
+function dbOpenError(cause) {
+    var name = cause ? (cause.name || 'Error') : 'MissingIndexedDB';
+    var msg;
+    if (!cause) {
+        msg = 'This browser does not offer the storage (IndexedDB) the app keeps your collection in. ' +
+            'Use a current Chrome, Firefox, Safari or Edge, outside private browsing.';
+    } else if (name === 'VersionError') {
+        msg = 'Your saved data was written by a newer version of the app than this page. ' +
+            'Reload the page to get the newest version; if this stays, clear the browser cache for this site.';
+    } else if (name === 'InvalidStateError' || name === 'SecurityError') {
+        msg = 'The browser is not letting this site store data, as happens in private browsing or when ' +
+            'site data is blocked. Open the app in a normal window, or allow site data for it, then try again.';
+    } else if (name === 'QuotaExceededError') {
+        msg = 'The browser has no storage space left for this site. Free some disk space, then try again.';
+    } else {
+        msg = 'The browser could not open the app\'s saved data (' + name + (cause.message ? ': ' + cause.message : '') + '). ' +
+            'Try again; if it keeps happening, restart the browser.';
+    }
+    var err = new Error(msg);
+    err.name = 'DbOpenError';
+    err.dbErrorName = name;
+    err.cause = cause || null;
+    return err;
+}
 
 function openDB() {
-    return new Promise(function (resolve, reject) {
-        if (_db) return resolve(_db);
-        var req = indexedDB.open(DB_NAME, DB_VERSION);
+    if (_db) return Promise.resolve(_db);
+    if (_dbOpening) return _dbOpening;
+    var req;
+    try {
+        if (typeof indexedDB === 'undefined' || !indexedDB) throw null;
+        req = indexedDB.open(DB_NAME, DB_VERSION);
+    } catch (e) {
+        // Missing outright, or open() itself refused (e.g. a sandboxed frame).
+        // Not cached: "Try again" opens afresh.
+        return Promise.reject(dbOpenError(e));
+    }
+    // The open in progress is forgotten inside the request's own handlers, not
+    // in a later .then: the connection can close (onclose) before that runs,
+    // and openDB() would then hand out the closed one.
+    _dbOpening = new Promise(function (resolve, reject) {
         req.onupgradeneeded = function (e) {
             var db = e.target.result;
             if (!db.objectStoreNames.contains('releases')) {
@@ -84,25 +127,50 @@ function openDB() {
                 db.createObjectStore('want_alerts', { keyPath: 'id' });
             }
         };
+        // Another tab still holds the older version open. The open carries on
+        // by itself once that tab closes, so this waits rather than failing,
+        // and says what it is waiting for (the view shows "Loading …" meanwhile).
         req.onblocked = function () {
-            console.warn('IndexedDB upgrade blocked by another open tab. Please close other tabs and reload.');
+            console.warn('IndexedDB upgrade blocked by another open tab.');
+            if (!_dbBlockedToast || !_dbBlockedToast.parentNode) {
+                _dbBlockedToast = showToast('Another tab of this app is using an older version of your saved data. ' +
+                    'Close it (or reload it), and this tab continues by itself.', 'error', 20000);
+            }
         };
         req.onsuccess = function (e) {
-            _db = e.target.result;
+            var db = e.target.result;
+            _db = db;
+            _dbOpening = null;
+            _dismissDbBlockedToast();
+            // The browser can close the connection itself (storage cleared,
+            // disk error); the next call then opens a fresh one. Only this
+            // connection: a newer one may have replaced it by then.
+            db.onclose = function () { if (_db === db) _db = null; };
             // If another tab opens a newer DB version, close this connection so
             // the upgrade can proceed rather than hanging indefinitely.
-            _db.onversionchange = function () {
-                _db.close();
-                _db = null;
+            db.onversionchange = function () {
+                db.close();
+                if (_db === db) _db = null;
                 // A blocking alert on purpose (not a toast): the reload below
                 // follows at once, and this is the only way to say why.
                 alert('The app database was updated in another tab. This tab will now reload.');
                 window.location.reload();
             };
-            resolve(_db);
+            resolve(db);
         };
-        req.onerror = function (e) { reject(e.target.error); };
+        req.onerror = function () {
+            // Not cached: "Try again" opens afresh.
+            _dbOpening = null;
+            // The error screen says what went wrong; the "waiting" notice is moot.
+            _dismissDbBlockedToast();
+            reject(dbOpenError(req.error));
+        };
     });
+    return _dbOpening;
+}
+
+function _dismissDbBlockedToast() {
+    if (_dbBlockedToast) { _dismissToast(_dbBlockedToast); _dbBlockedToast = null; }
 }
 
 function dbPut(store, item) {

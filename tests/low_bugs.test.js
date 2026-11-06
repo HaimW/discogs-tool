@@ -108,6 +108,8 @@ test('L2: re-rendering the queue panel removes the old panel\'s document listene
     };
     const ctx = load(['src/utils.js', 'src/actions.js', 'src/queue.js'], {
         document, window: { innerWidth: 1000, innerHeight: 800 }, setTimeout: () => 0,
+        // The rows' BPM / key (F16) are read after drawing; none here.
+        Promise, dbGetAll: () => Promise.resolve([]),
         currentQueue: [{ title: 't', artist: 'a', youtubeId: 'x' }], currentIndex: 0,
     });
     ctx._renderQueuePanel();

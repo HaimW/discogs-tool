@@ -58,7 +58,7 @@ function onPlayerStateChange(event) {
         if (currentIndex < currentQueue.length - 1) {
             currentIndex++;
             loadFromQueue(currentIndex);
-            if (document.getElementById('queue-panel')) _renderQueuePanel();
+            if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
         } else {
             isPlaying = false;
             stopViz();
@@ -81,7 +81,7 @@ function onPlayerStateChange(event) {
             updatePlayPauseBtn();
             _savePlayerState();
             if (cfEnabled) setTimeout(_preloadNextTrack, 800);
-            if (document.getElementById('queue-panel')) _renderQueuePanel();
+            if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
             return;
         }
         // YouTube may not carry the volume over a new video (src/volume.js):
@@ -109,7 +109,7 @@ function onPlayerError(event) {
     if (currentIndex < currentQueue.length - 1) {
         currentIndex++;
         loadFromQueue(currentIndex);
-        if (document.getElementById('queue-panel')) _renderQueuePanel();
+        if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
     } else {
         isPlaying = false;
         stopViz();
@@ -362,7 +362,7 @@ function shufflePlay(limitOverride) {
             });
             currentIndex = 0;
             loadFromQueue(0);
-            _renderQueuePanel();  // Auto-open queue so the shuffled list is immediately visible
+            _renderQueuePanel({ reveal: 'open' });  // Auto-open queue so the shuffled list is immediately visible
         });
     });
 }

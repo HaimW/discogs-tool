@@ -44,10 +44,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isPlaying) player.pauseVideo(); else player.playVideo();
     });
     document.getElementById('np-next').addEventListener('click', function () {
-        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel(); }
+        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' }); }
     });
     document.getElementById('np-prev').addEventListener('click', function () {
-        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel(); }
+        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' }); }
     });
     document.getElementById('np-suggest').addEventListener('click', openSuggestions);
     document.getElementById('np-queue').addEventListener('click', openQueue);
@@ -80,7 +80,9 @@ document.addEventListener('DOMContentLoaded', function () {
         _saveCrossfadeSettings();
     });
 
-    _loadCrossfadeSettings();
+    // Defaults stay if the database will not open; the view's error screen
+    // explains that, so this only logs it.
+    _loadCrossfadeSettings().catch(function (err) { console.warn('Could not load crossfade settings:', err); });
 
     // Volume (F15): 'input' applies while dragging / per arrow key; the
     // value is stored on 'change' (release, or each key step), not every tick.
@@ -96,7 +98,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     _loadVolumeSettings();
 
-    updateNotifBadge();
+    // Likewise for the alert badge.
+    updateNotifBadge().catch(function (err) { console.warn('Could not count unseen alerts:', err); });
     startMarketplacePoll();
 
     window.addEventListener('popstate', function () {

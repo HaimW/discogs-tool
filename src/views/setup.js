@@ -1,7 +1,9 @@
 // ============ Setup View ============
 
 function renderSetup() {
-    getConfig().then(function (config) {
+    var tok = startViewRender('setup');
+    return endViewRender(tok, getConfig().then(function (config) {
+        if (!viewRenderIsCurrent(tok)) return;
         var app = document.getElementById('app');
         app.innerHTML =
             '<div class="setup-page"><div class="setup-card">' +
@@ -24,7 +26,7 @@ function renderSetup() {
             '<button class="btn btn-primary btn-large btn-full" id="setup-submit"' + act('click', 'submitSetup') + '>Save &amp; Continue</button>' +
             '<div id="setup-status" class="setup-status" role="status" aria-live="polite"></div>' +
             '</div></div></div>';
-    });
+    }));
 }
 
 // Checks the token with Discogs before saving it (P6), so a typo shows up

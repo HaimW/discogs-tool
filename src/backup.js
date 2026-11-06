@@ -1,6 +1,7 @@
 // ============ Backup / Restore ============
 
 function renderBackup() {
+    startViewRender();
     var app = document.getElementById('app');
     app.innerHTML =
         '<div class="backup-page">' +

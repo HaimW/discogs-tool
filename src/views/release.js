@@ -3,13 +3,15 @@ function renderRelease(releaseId) {
     // IndexedDB keys are numbers; queues saved in sessionStorage by older
     // builds carry string ids, which would miss every lookup below.
     releaseId = parseInt(releaseId, 10) || releaseId;
-    Promise.all([
+    var tok = startViewRender('release', releaseId);
+    return endViewRender(tok, Promise.all([
         dbGet('releases', releaseId),
         dbGetByIndex('videos', 'release_id', releaseId),
         dbGetByIndex('track_meta', 'release_id', releaseId),
         dbGetByIndex('tracklist', 'release_id', releaseId),
         dbGet('wants', releaseId)
     ]).then(function (results) {
+        if (!viewRenderIsCurrent(tok)) return;
         var r = results[0];
         var videos = results[1].sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
         var metaById = {};
@@ -154,7 +156,7 @@ function renderRelease(releaseId) {
 
         document.getElementById('app').innerHTML = html;
         if (tracklistTracks.length === 0) fetchTracklistLazy(releaseId);
-    });
+    }));
 }
 
 // One playable video row on the release page.

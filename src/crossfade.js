@@ -1,7 +1,7 @@
 // ============ Crossfade ============
 
 function _loadCrossfadeSettings() {
-    Promise.all([
+    return Promise.all([
         dbGet('config', 'crossfade_enabled'),
         dbGet('config', 'crossfade_seconds')
     ]).then(function (results) {

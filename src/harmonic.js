@@ -35,9 +35,12 @@ function bpmDelta(a, b) {
 function scoreCandidate(current, cand) {
     var score = 0;
     var keyMatched = false;
-    if (current.key && cand.key) {
-        var compat = compatibleKeys(current.key);
-        var idx = compat.indexOf(cand.key);
+    // Normalized, so hand-typed "8a", "08A" or "Am" match too (not only "8A").
+    var curKey = camelotCode(current.key);
+    var candKey = camelotCode(cand.key);
+    if (curKey && candKey) {
+        var compat = compatibleKeys(curKey);
+        var idx = compat.indexOf(candKey);
         if (idx === 0) { score += 100; keyMatched = true; }
         else if (idx > 0) { score += 70; keyMatched = true; }
     }
@@ -49,7 +52,9 @@ function scoreCandidate(current, cand) {
     if (current.bpm && cand.bpm) {
         var delta = bpmDelta(current.bpm, cand.bpm);
         if (delta <= 6) score += Math.max(0, 100 - delta * 10);
-        else if (delta <= 12) score += Math.max(0, 50 - (delta - 6) * 3);
+        // Continues down from the 40 the first band ends on, so a closer tempo
+        // never scores lower than a further one (L8).
+        else if (delta <= 12) score += Math.max(0, 40 - (delta - 6) * 4 / 3);
     }
     if (cand.rating) score += cand.rating * 2;
     return score;
@@ -95,7 +100,10 @@ function openSuggestions() {
 
         var cands = [];
         videos.forEach(function (v) {
-            if (!v.youtube_id || queueSet[(v.release_id || '') + '_' + v.youtube_id]) return;
+            // A queue entry without a release id ('_' + video) keeps that video
+            // out whatever its release (L7).
+            if (!v.youtube_id || queueSet[(v.release_id || '') + '_' + v.youtube_id] ||
+                    queueSet['_' + v.youtube_id]) return;
             var r = relById[v.release_id] || {};
             var m = metaById[v.release_id + '_' + v.youtube_id] || {};
             var c = {
@@ -182,7 +190,7 @@ function closeSuggestions() {
 function playNextSuggestion(idx) {
     var c = _suggestions[idx];
     if (!c) return;
-    var item = { youtubeId: c.youtubeId, title: c.title, artist: c.artist, cover: c.cover };
+    var item = { youtubeId: c.youtubeId, releaseId: c.releaseId || null, title: c.title, artist: c.artist, cover: c.cover };
     currentQueue.splice(currentIndex + 1, 0, item);
     currentIndex++;
     loadFromQueue(currentIndex);

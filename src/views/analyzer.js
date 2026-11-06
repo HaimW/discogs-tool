@@ -17,6 +17,7 @@ var _analyzerPoll = null;
 var _analyzerLastLog = 0;
 
 function renderAnalyzer() {
+    startViewRender();
     document.getElementById('app').innerHTML =
         '<div class="analyzer-page">' +
         '<div class="collection-header"><div class="collection-stats">' +

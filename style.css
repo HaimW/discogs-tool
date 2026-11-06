@@ -343,6 +343,29 @@ a:hover { color: var(--accent-hover); }
 .empty-title { font-family: var(--font-mono); font-size: 22px; margin-bottom: 8px; }
 .empty-subtitle { color: var(--text-muted); margin-bottom: 24px; }
 
+/* ============ VIEW LOADING / ERROR (src/view_state.js) ============ */
+
+.view-loading {
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    padding: 80px 20px; color: var(--text-muted); font-size: 14px;
+}
+.view-loading-spinner {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    animation: spin 0.9s linear infinite;
+}
+/* A refresh of the view on screen keeps it, dimmed, so nothing jumps. */
+.view-refreshing { opacity: 0.6; transition: opacity 0.2s; cursor: progress; }
+.view-error-detail {
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+    margin: -12px auto 24px; max-width: 640px; overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+    /* No spinning: a still ring with the "Loading …" text beside it. */
+    .view-loading-spinner { animation: none; border-color: var(--accent); }
+    .view-refreshing { transition: none; }
+}
+
 /* ============ RELEASE DETAIL ============ */
 
 .back-link { display: inline-block; font-size: 13px; color: var(--text-muted); margin-bottom: 20px; cursor: pointer; }
@@ -715,10 +738,34 @@ a:hover { color: var(--accent-hover); }
     font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
 }
 .queue-actions { display: flex; gap: 4px; flex-shrink: 0; }
+/* BPM over the key chip (F16), beside the row number. The column only shows
+   once some row in the queue has data; then every row reserves the same width
+   so the thumbnails stay aligned, and its height stays under the thumbnail's,
+   so filling it in moves nothing. */
+.queue-meta { display: none; }
+.queue-has-meta .queue-meta {
+    display: flex; flex-shrink: 0; width: 32px; height: 36px;
+    align-items: center; justify-content: center;
+}
+.queue-meta-vis {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.queue-bpm {
+    font-family: var(--font-mono); font-size: 10px; line-height: 12px;
+    color: var(--accent);
+}
+.queue-bpm-estimated { opacity: 0.75; }
+.queue-meta .camelot-chip {
+    font-size: 9px; line-height: 11px; padding: 0 3px; gap: 0;
+}
 .queue-play-btn, .queue-remove-btn { padding: 4px 8px !important; font-size: 11px !important; }
 
 @media (max-width: 768px) {
     .queue-panel { right: 8px; left: 8px; width: auto; bottom: calc(var(--player-height, 100px) + 16px); }
+}
+@media (max-width: 480px) {
+    /* Phones: tighter gaps leave the title room beside the BPM / key column. */
+    .queue-row { gap: 6px; padding: 6px 4px; }
 }
 
 /* ============ TRACKS VIEW ============ */
@@ -1378,6 +1425,7 @@ body { padding-bottom: var(--player-height); }
     padding: 32px 20px; text-align: center;
     font-size: 13px; color: var(--text-dim); line-height: 1.6;
 }
+.notif-empty .btn { margin-top: 12px; }
 
 .notif-item {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;

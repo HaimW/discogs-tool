@@ -234,7 +234,9 @@ function openNotifPanel() {
 
         html += '<div class="notif-list">';
         if (notifications.length === 0) {
-            html += '<div class="notif-empty">No alerts yet.<br>You\'ll be notified when records on your want list go on sale.</div>';
+            html += '<div class="notif-empty">No alerts yet.<br>You\'ll be notified when records on your want list go on sale, ' +
+                'or drop to a max price you set on a want (&#128276;).' +
+                '<br><button class="btn btn-sm"' + act('click', 'notifOpenWantList') + '>Open want list</button></div>';
         } else {
             notifications.forEach(function (n) {
                 html += '<div class="notif-item">';
@@ -260,6 +262,11 @@ function openNotifPanel() {
         panel.innerHTML = html;
         panel.classList.add('open');
     });
+}
+
+function notifOpenWantList() {
+    closeNotifPanel();
+    navigate('wantlist');
 }
 
 function closeNotifPanel() {

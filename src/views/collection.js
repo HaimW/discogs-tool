@@ -1,6 +1,8 @@
 
 function renderCollection() {
-    Promise.all([dbGetAll('releases'), dbGetAll('folders'), dbGetAll('videos')]).then(function (results) {
+    var tok = startViewRender('collection');
+    return endViewRender(tok, Promise.all([dbGetAll('releases'), dbGetAll('folders'), dbGetAll('videos')]).then(function (results) {
+        if (!viewRenderIsCurrent(tok)) return;
         var allReleases = results[0];
         var folders = results[1].filter(function (f) { return f.id !== 0; });
         var allVideos = results[2];
@@ -162,8 +164,8 @@ function renderCollection() {
             html += renderPagination(page, totalPages, 'goPage');
         } else {
             if (_filters.q || _filters.genre || _filters.folder || _filters.country) {
-                html += '<div class="empty-state"><p class="empty-title">No releases found</p>' +
-                        '<p class="empty-subtitle">Try a different search or filter</p>' +
+                html += '<div class="empty-state"><p class="empty-title">No releases match</p>' +
+                        '<p class="empty-subtitle">Adjust the search or filters, or clear them to see the whole collection.</p>' +
                         '<button class="btn btn-primary"' + act('click', 'clearAllFilters') + '>Show All</button></div>';
             } else {
                 html += '<div class="empty-state"><div class="vinyl-icon-huge">&#9898;</div>' +
@@ -174,6 +176,6 @@ function renderCollection() {
         }
 
         document.getElementById('app').innerHTML = html;
-    });
+    }));
 }
 

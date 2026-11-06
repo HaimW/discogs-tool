@@ -1,12 +1,14 @@
 // ============ Tracks View ============
 
 function renderTracks() {
-    Promise.all([
+    var tok = startViewRender('tracks');
+    return endViewRender(tok, Promise.all([
         dbGetAll('videos'),
         dbGetAll('releases'),
         dbGetAll('track_meta'),
         dbGetAll('tracklist')
     ]).then(function (results) {
+        if (!viewRenderIsCurrent(tok)) return;
         var allVideos = results[0];
         var allReleases = results[1];
         var allMeta = results[2];
@@ -168,9 +170,7 @@ function renderTracks() {
 
         // Rows
         if (pageRows.length === 0) {
-            html += '<div class="empty-state"><p class="empty-title">No tracks match.</p>' +
-                '<p class="empty-subtitle">Adjust the filters or clear them to see everything.</p>' +
-                '<button class="btn btn-primary"' + act('click', 'tClearFilters') + '>Clear filters</button></div>';
+            html += tracksEmptyHtml(results[0].length, allReleases.length, allMeta, tf);
         } else {
             html += '<div class="video-list tracks-list">';
             pageRows.forEach(function (row) {
@@ -209,7 +209,33 @@ function renderTracks() {
         }
 
         document.getElementById('app').innerHTML = html;
-    });
+    }));
+}
+
+// What the list says when it has no rows (P6): nothing synced yet, records
+// without video links yet, a BPM/key filter when no track has either, or
+// filters that match nothing.
+function tracksEmptyHtml(videoCount, releaseCount, allMeta, tf) {
+    if (videoCount === 0) {
+        var sub = releaseCount === 0
+            ? 'Sync your Discogs collection: the YouTube links on your records become the tracks listed here.'
+            : 'None of your records has a video link yet. The sync fetches them after the records themselves; run it, or let a running one finish.';
+        return '<div class="empty-state"><div class="vinyl-icon-huge">&#9898;</div>' +
+            '<p class="empty-title">No tracks yet</p>' +
+            '<p class="empty-subtitle">' + sub + '</p>' +
+            '<button class="btn btn-primary btn-large"' + act('click', 'startSync') + '><span class="sync-icon">&#8635;</span> Sync Collection</button></div>';
+    }
+    var wantsBpmKey = tf.bpmMin !== '' || tf.bpmMax !== '' || !!tf.key;
+    var anyBpmKey = allMeta.some(function (m) { return m.bpm != null || !!m.key; });
+    if (wantsBpmKey && !anyBpmKey) {
+        return '<div class="empty-state"><p class="empty-title">No tracks have a BPM or key yet</p>' +
+            '<p class="empty-subtitle">Add them with &#9998; on a track, or measure the whole collection with the Desktop Analyzer.</p>' +
+            '<button class="btn btn-primary"' + act('click', 'tClearFilters') + '>Clear filters</button> ' +
+            '<button class="btn"' + act('click', 'navigate', ['analyzer']) + '>Open the Analyzer</button></div>';
+    }
+    return '<div class="empty-state"><p class="empty-title">No tracks match</p>' +
+        '<p class="empty-subtitle">Adjust the filters or clear them to see every track.</p>' +
+        '<button class="btn btn-primary"' + act('click', 'tClearFilters') + '>Clear filters</button></div>';
 }
 
 function tDoSearch() {

@@ -1,13 +1,15 @@
 // ============ Want List View ============
 
 function renderWantList() {
-    Promise.all([
+    var tok = startViewRender('wantlist');
+    return endViewRender(tok, Promise.all([
         dbGetAll('wants'),
         dbGetAll('releases'),
         dbGetAll('videos'),
         dbGetAll('marketplace_stats'),
         dbGetAll('want_alerts')
     ]).then(function (results) {
+        if (!viewRenderIsCurrent(tok)) return;
         var allWants = results[0];
         var allCollectionReleases = results[1];
         var allVideos = results[2];
@@ -226,7 +228,8 @@ function renderWantList() {
                 '<p class="empty-subtitle">Sync your Discogs want list to see it here</p>' +
                 '<button class="btn btn-primary btn-large"' + act('click', 'startWantListSync') + '><span class="sync-icon">&#8635;</span> Sync Want List</button></div>';
         } else if (filtered.length === 0) {
-            html += '<div class="empty-state"><p class="empty-title">No wants match.</p>' +
+            html += '<div class="empty-state"><p class="empty-title">No wants match</p>' +
+                '<p class="empty-subtitle">Adjust the filters or clear them to see every want.</p>' +
                 '<button class="btn btn-primary"' + act('click', 'wlClearFilters') + '>Clear filters</button></div>';
         } else {
             html += '<div class="release-grid wl-grid">';
@@ -303,7 +306,7 @@ function renderWantList() {
         }
 
         document.getElementById('app').innerHTML = html;
-    });
+    }));
 }
 
 // ============ Want List Filter Helpers ============
@@ -416,7 +419,7 @@ function wlShufflePlay(limitOverride) {
             });
             currentIndex = 0;
             loadFromQueue(0);
-            _renderQueuePanel();
+            _renderQueuePanel({ reveal: 'open' });
         });
     });
 }

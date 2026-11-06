@@ -182,7 +182,9 @@ function statsPctLabel(pct) {
 // ---------- view ----------
 
 function renderStats() {
-    Promise.all([dbGetAll('releases'), dbGet('config', 'collection_value')]).then(function (res) {
+    var tok = startViewRender('stats');
+    return endViewRender(tok, Promise.all([dbGetAll('releases'), dbGet('config', 'collection_value')]).then(function (res) {
+        if (!viewRenderIsCurrent(tok)) return;
         if (_currentView !== 'stats') return;
         var releases = res[0] || [];
         var value = res[1] || null;
@@ -213,7 +215,7 @@ function renderStats() {
         html += _statsTableHtml('Format', statsBreakdown(releases, 'format', STATS_TOP_N), 'A release in several formats counts in each.');
         html += '</div></div>';
         document.getElementById('app').innerHTML = html;
-    });
+    }));
 }
 
 function _statsValueHtml(value) {

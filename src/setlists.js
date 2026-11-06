@@ -271,7 +271,9 @@ function closeAllPopovers() {
 // ------ Setlists index view ------
 
 function renderSetlists() {
-    dbGetAll('setlists').then(function (setlists) {
+    var tok = startViewRender('setlists');
+    return endViewRender(tok, dbGetAll('setlists').then(function (setlists) {
+        if (!viewRenderIsCurrent(tok)) return;
         setlists.sort(function (a, b) { return (b.updated_at || '').localeCompare(a.updated_at || ''); });
         var html = '<div class="collection-header"><div class="collection-stats">' +
             '<h1>Setlists</h1>' +
@@ -295,14 +297,16 @@ function renderSetlists() {
             html += '</div>';
         }
         document.getElementById('app').innerHTML = html;
-    });
+    }));
 }
 
 // ------ Setlist detail view ------
 
 function renderSetlist(setlistId) {
+    var tok = startViewRender('setlist', setlistId);
     if (!setlistId) { navigate('setlists'); return; }
-    Promise.all([dbGet('setlists', setlistId), dbGetAll('track_meta')]).then(function (results) {
+    return endViewRender(tok, Promise.all([dbGet('setlists', setlistId), dbGetAll('track_meta')]).then(function (results) {
+        if (!viewRenderIsCurrent(tok)) return;
         var sl = results[0];
         if (!sl) { navigate('setlists'); return; }
         var metaById = {};
@@ -329,8 +333,9 @@ function renderSetlist(setlistId) {
         html += '<textarea class="setlist-notes" placeholder="Setlist notes (venue, vibe, intro track idea...)"' + act('change', 'saveSetlistNotes', [sl.id, ACT_VALUE]) + '>' + escHtml(sl.notes || '') + '</textarea>';
 
         if (tracks.length === 0) {
-            html += '<div class="empty-state"><p class="empty-title">Empty setlist</p>' +
-                '<p class="empty-subtitle">Add tracks from Collection or All Tracks view using the + button</p></div>';
+            html += '<div class="empty-state"><p class="empty-title">This setlist is empty</p>' +
+                '<p class="empty-subtitle">Add tracks with the + button on a release page or in Tracks.</p>' +
+                '<button class="btn btn-primary"' + act('click', 'navigate', ['tracks']) + '>Browse tracks</button></div>';
         } else {
             html += '<div class="video-list setlist-tracklist">';
             tracks.forEach(function (t, i) {
@@ -370,7 +375,7 @@ function renderSetlist(setlistId) {
         html += '</div>';
         document.getElementById('app').innerHTML = html;
         if (tracks.length > 0) initSetlistDragDrop(sl.id);
-    });
+    }));
 }
 
 function playSetlist(id) {

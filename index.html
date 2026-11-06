@@ -44,6 +44,10 @@
         <span id="sync-message">Syncing...</span>
     </div>
 
+    <!-- Announces "Loading …" for a slow view (src/view_state.js). Outside
+         #app on purpose: changes inside a region marked aria-busy are held back. -->
+    <div id="view-status" class="sr-only" role="status" aria-live="polite"></div>
+
     <main class="content" id="app">
         <!-- SPA content rendered here by app.js -->
     </main>
@@ -137,6 +141,7 @@
     <script src="src/camelot.js"></script>
     <script src="src/config.js"></script>
     <script src="src/api.js"></script>
+    <script src="src/view_state.js"></script>
     <script src="src/router.js"></script>
     <script src="src/visualizer.js"></script>
     <script src="src/video_match.js"></script>
@@ -147,6 +152,7 @@
     <script src="src/search.js"></script>
     <script src="src/meta_editor.js"></script>
     <script src="src/harmonic.js"></script>
+    <script src="src/queue_meta.js"></script>
     <script src="src/queue.js"></script>
     <script src="src/marketplace.js"></script>
     <script src="src/setlists.js"></script>

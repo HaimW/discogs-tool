@@ -6,11 +6,13 @@ var _storeItemsCache = [];
 // ---- Main render ----
 
 function renderStore() {
-    Promise.all([
+    var tok = startViewRender('store');
+    return endViewRender(tok, Promise.all([
         dbGetAll('releases'),
         dbGetAll('store_items'),
         dbGetAll('store_batches')
     ]).then(function (res) {
+        if (!viewRenderIsCurrent(tok)) return;
         var releases = res[0];
         var storeItems = res[1];
         var batches = res[2];
@@ -135,7 +137,14 @@ function renderStore() {
         // ---- Inventory table ----
         html += '<div class="store-inventory">';
 
-        if (storeItems.length === 0) {
+        if (storeItems.length === 0 && releases.length === 0) {
+            html += '<div class="empty-state">' +
+                '<div class="vinyl-icon-huge">&#9898;</div>' +
+                '<p class="empty-title">Nothing to serialize yet</p>' +
+                '<p class="empty-subtitle">Sync your Discogs collection first; then serialize it to give every record a permanent serial number.</p>' +
+                '<button class="btn btn-primary btn-large"' + act('click', 'startSync') + '><span class="sync-icon">&#8635;</span> Sync Collection</button>' +
+                '</div>';
+        } else if (storeItems.length === 0) {
             html += '<div class="empty-state">' +
                 '<div class="vinyl-icon-huge">&#9898;</div>' +
                 '<p class="empty-title">No records serialized yet</p>' +
@@ -144,6 +153,7 @@ function renderStore() {
                 '</div>';
         } else if (filtered.length === 0) {
             html += '<div class="empty-state"><p class="empty-title">No records match your filters</p>' +
+                '<p class="empty-subtitle">Adjust the search, status or batch, or clear them to see the whole inventory.</p>' +
                 '<button class="btn btn-primary"' + act('click', 'storeClearFilters') + '>Clear Filters</button></div>';
         } else {
             html += '<div class="store-table-wrap"><table class="store-table">';
@@ -214,7 +224,7 @@ function renderStore() {
         html += '</div>'; // .store-inventory
 
         document.getElementById('app').innerHTML = html;
-    });
+    }));
 }
 
 // ---- Filter helpers ----

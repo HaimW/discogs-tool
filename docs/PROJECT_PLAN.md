@@ -11,11 +11,13 @@
 - **Done:** all CRITICAL and HIGH bugs (C1, H1–H4); the desktop BPM/key analyzer (§3b) built and run over the whole collection; plus several features that were never in the plan (see §6).
 - **Data-safety bugs M2–M5 fixed and price-history recording (F10) started** on 2026-11-06, with tests.
 - **M1 fixed** the same day: all MEDIUM bugs are done.
-- **LOW bugs done too** (L1, L2, L4–L6 fixed; L3 closed as not a bug): the whole §1 bug list is now closed.
+- **LOW bugs done too** (L1, L2, L4–L9 fixed; L3 closed as not a bug): the whole §1 bug list is now closed.
 - **P3/P4/P6 started 2026-11-06:** lint + CI in place, Playwright smoke tests committed and run in CI, all inline handlers replaced (P4 done), toasts, setup token check, lazy background video.
 - **Also 2026-11-06:** backup format v3 with authored/derived labelling (§5c), the Stats view (F11), max-price alerts (F9), and the relative key shown beside every key.
-- **Next up:** ES modules (P3), loading/empty states (P6), PWA (P5), the barcode scanner (F7, last of M-2), and the B2 YouTube player blocker.
-- **Not started:** the backend (B3) and everything that needs it, the track identity refactor (§5c), and the F-features other than F9, F10 (recording only) and F11.
+- **P6 done 2026-11-06:** loading, empty and error states for every view; `harmonic.js` and `store_serial.js` now tested (found and fixed L7, L8).
+- **Queue fixes 2026-11-06:** the queue list and a dragged panel stay put on every redraw (L9), and rows show BPM + key (F16).
+- **Next up:** PWA (P5), the barcode scanner (F7, last of M-2), and the B2 YouTube player blocker.
+- **Not started:** the backend (B3) and everything that needs it, the track identity refactor (§5c), and the F-features other than F9, F10 (recording only), F11, F15 and F16.
 
 ---
 
@@ -139,6 +141,30 @@ These are not features — they are prerequisites for a paid product.
 - **What:** Certain page counts render doubled `...` or odd gaps. Cosmetic.
 - **Status:** [x] Fixed 2026-11-06. One shared `renderPagination()` / `paginationPages()` (`src/utils.js`) replaces the three copies: one "…" per gap, and a single hidden page is shown instead of hidden behind "…". Tested for every page of every size up to 40 in `tests/low_bugs.test.js`.
 
+#### L7 — "Play next" on a suggestion drops the release, so the track suggests itself
+- **Where:** `src/harmonic.js` (`playNextSuggestion`, and the queue filter in `openSuggestions`)
+- **What:** Found 2026-11-06 while adding `tests/harmonic.test.js`. "Play next" queued the suggestion without its `releaseId` ("Queue" kept it). The suggestions leave out queued tracks by release + video, so with the release missing, opening suggestions again while that track played listed the playing track as its own best match (same key, same tempo). Any queue entry without a release id (e.g. a track row whose id did not parse) had the same gap.
+- **Fix:** `playNextSuggestion` keeps `releaseId`, as `addSuggestionToQueue` does; a queue entry with no release id now keeps its video out of the suggestions whatever the release.
+- **Status:** [x] Fixed 2026-11-06. Two tests in `tests/harmonic.test.js` failed before the fix and pass after.
+
+#### L8 — Harmonic suggestions rank some further tempos above closer ones
+- **Where:** `src/harmonic.js` (`scoreCandidate`, the tempo bonus)
+- **What:** Found 2026-11-06 while adding `tests/harmonic.test.js`. The tempo bonus fell from 100 to 40 over the first 6 % of difference, then restarted at 50 for 6–12 %. So a track 6.25 % off scored 49.25 and outranked one 5.5 % off (45), and everything between about 5 % and 9.3 % ranked in the wrong order.
+- **Fix:** The 6–12 % band now continues down from 40 (`40 - (delta - 6) * 4/3`), ending at 32 at 12 % as before. Nothing else in the score changed.
+- **Status:** [x] Fixed 2026-11-06. `tests/harmonic.test.js` checks the score never rises as the tempo gets further away; it failed before the fix.
+
+#### L9 — Queue list jumps away from where you were browsing
+- **Where:** `src/queue.js` `_renderQueuePanel()` (rebuilds the whole panel), called from `playFromQueuePanel`, `removeFromQueuePanel`, `src/player.js` track changes and Next.
+- **What:** Reported 2026-11-06: scroll the queue, press ▶ on a track in the middle, and the list jumps so the playing track is the *last* visible row. Every rebuild starts the new list at the top, then `scrollIntoView({ block: 'nearest' })` scrolls just far enough to show the current track. The same jump happens on removing a track, on auto-advance and on Next. A dragged panel likely jumps back to its default position for the same reason (to verify).
+- **Fix:** Keep the list's scroll position (and the panel's dragged position) across rebuilds; scroll the current track into view only when the queue opens, or when a track changes on its own and the new one is out of view.
+- **Status:** [x] Fixed 2026-11-06. A redraw now carries over the list's scroll position, the panel's dragged position, a drag still under way and the focused row button (`_renderQueuePanel(opts)`, `src/queue.js`). The current track is brought into view only (a) when the panel opens or shows a new shuffled queue (centred if it is out of view) and (b) when playback moves on by itself or by Next/Prev — track ended, crossfade hand-over, unplayable video skipped — and then only if the new row is hidden, scrolling the list just far enough and never the page. ▶ and × on a row, and a suggestion queued, leave the list exactly where it was. The scroll happens straight away instead of 50 ms later, so nothing moves after drawing. The dragged-panel jump was real: before the fix the panel snapped back 300 px to its default corner on the first redraw after a drag. L2 still holds (the old panel's listeners are removed). `tests/e2e/queue.spec.js` (4 tests, two failed before the fix: list moved 137 px on ▶, panel moved 300 px).
+
+#### L10 — An open queue panel can show old rows
+- **Where:** harmonic "Play next" (`src/harmonic.js`), setlist play buttons (`src/setlists.js`), want-list play (`src/views/wantlist.js`).
+- **What:** Found 2026-11-06 during the L9 work (existed before it): these change the queue or the current track without redrawing an open queue panel, so it shows stale rows until the next redraw.
+- **Fix:** Redraw an open queue panel (`_renderQueuePanel({ reveal: 'ifHidden' })`) wherever the queue or current track changes; one helper so no caller can forget.
+- **Status:** [ ]
+
 ### Triage table
 
 | ID | Severity | One-line | Effort | Status |
@@ -154,6 +180,10 @@ These are not features — they are prerequisites for a paid product.
 | M4 | Medium | Surprise autoplay on tab restore | S | ✅ |
 | M5 | Medium | Notification baseline edge cases after restore | S | ✅ |
 | L1–L6 | Low | Leaked timers/listeners, dead bg script, cosmetics | S each | ✅ (L3 won't fix) |
+| L7 | Low | "Play next" drops the release → the playing track is suggested as its own next match | S | ✅ |
+| L8 | Low | Tempo bonus jumps at 6 % → further tempos outrank closer ones | S | ✅ |
+| L10 | Low | Open queue panel shows stale rows after Play next / setlist / want-list play | S | open |
+| L9 | Low | Queue list (and a dragged panel) jumps on every redraw | S | ✅ |
 
 ---
 
@@ -161,10 +191,10 @@ These are not features — they are prerequisites for a paid product.
 
 - [x] **P1 — Fix C1–H3 first.** With a Discogs token in IndexedDB, XSS is account takeover; can't charge money on top of that. *Done: C1 and H1–H4 fixed (2026-06-12, 2026-10-13).*
 - [ ] **P2 — Accounts + cloud sync.** "Your data lives only in this browser" is the #1 commercial weakness; flip it into the #1 paid feature ("synced across devices, never lose crate data"). IndexedDB stays as offline cache; sync to backend.
-- [~] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI. *2026-11-06: tooling in place — `package.json` (`npm test`, `npm run lint`, `npm run check`), ESLint 10 with a config that collects every file's top-level globals so `no-undef` still catches typos across the shared scope (lint is clean), and `.github/workflows/web-app.yml` running lint + tests on every push and PR. 85 unit tests in 9 files. Playwright smoke tests committed the same day: 12 tests in `tests/e2e/` (click through every nav view, setup token check, toasts, lazy background video), run with `npm run test:e2e` against a local static server with every request blocked except a faked `api.discogs.com`; `@playwright/test` pinned at 1.62.1; a CI `e2e` job runs them beside lint + unit tests. Still to do: ES modules and type checking.*
+- [~] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI. *2026-11-06: tooling in place — `package.json` (`npm test`, `npm run lint`, `npm run check`), ESLint 10 with a config that collects every file's top-level globals so `no-undef` still catches typos across the shared scope (lint is clean), and `.github/workflows/web-app.yml` running lint + tests on every push and PR. 196 unit tests in 15 files (2026-11-06, after the `harmonic.js`/`store_serial.js` tests, P6 and F16). Playwright smoke tests committed the same day: now 27 tests in `tests/e2e/` (click through every nav view, setup token check, toasts, lazy background video, loading/empty/error states, volume, the queue panel), run with `npm run test:e2e` against a local static server with every request blocked except a faked `api.discogs.com`; `@playwright/test` pinned at 1.62.1; a CI `e2e` job runs them beside lint + unit tests. Still to do: ES modules and type checking — **deferred 2026-11-06** (see §5a).*
 - [x] **P4 — Event delegation.** Replace all inline `onclick="..."` string building with `data-*` attributes + delegated listeners (also resolves C1 permanently). *Done 2026-11-06: all 140 inline handlers replaced. `act(type, fnName, args)` (`src/actions.js`) renders `data-on-<type>` + JSON `data-args-<type>`; one listener per event type on `document` (click, change, input, Enter, Escape) calls the function, innermost first, bubbling like inline handlers did. `escJs()` is no longer used. `tests/actions.test.js` fails if an inline handler returns or an action names a missing function; a browser run clicked through every view with no errors.*
 - [ ] **P5 — PWA.** Manifest + service worker → installable, offline crate browsing at record fairs; pairs perfectly with the store/serial feature. *No manifest or service worker yet.*
-- [~] **P6 — UX polish.** Proper toast system instead of `alert()` and sync-banner reuse; loading/empty states; error boundaries. *2026-11-06: toasts done (`src/toast.js`; 11 of 12 `alert()`s and all 6 one-off sync-banner notices replaced — the one left is the forced reload after another tab's DB upgrade, where a blocking message is the point). Setup token check and lazy background video done (§5b). Still to do: loading/empty states and error boundaries.*
+- [x] **P6 — UX polish.** Proper toast system instead of `alert()` and sync-banner reuse; loading/empty states; error boundaries. *2026-11-06: toasts done (`src/toast.js`; 11 of 12 `alert()`s and all 6 one-off sync-banner notices replaced — the one left is the forced reload after another tab's DB upgrade, where a blocking message is the point). Setup token check and lazy background video done (§5b).* *2026-11-06 (later): loading/empty states and error boundaries done. Every view now goes through one wrapper (`src/view_state.js`, used by `renderCurrentView`): "Loading …" only after 250 ms (no flash), `aria-busy` + a `role=status` line, no spinning with reduced motion; a refresh keeps the page dimmed instead of blanking it. Render tokens stop a slow older render from overwriting a newer one. A view that throws or rejects is logged and replaced by a message with Try again. A database that will not open (no IndexedDB, private mode, VersionError, quota) says why instead of a blank page; a blocked upgrade waits with a notice; `openDB` now shares one open request. Empty states checked across all views; fixed the ones that were wrong or had no next step (Tracks on a fresh install, BPM/key filter with no metadata, Store before the first sync, empty setlist, alerts panel). 25 unit (`tests/view_state.test.js`) + 6 e2e (`tests/e2e/states.spec.js`) tests. Re-renders that skip the router (filter clicks, sync and poll refreshes) get no loading delay but share the same guard: they draw only while still the newest render on their own page, and a failure there also ends on the error screen.*
 - [ ] **P7 — Landing page + demo mode.** Pricing page, docs, and a demo collection so prospects can try without a Discogs token.
 
 ---
@@ -193,6 +223,7 @@ Sourced from Discogs forum complaints and competing companion apps (CLZ, Vinyly,
 - [ ] **F13 — Visual shelf finder.** The `shelf` field already exists in track_meta; add an ordered shelf-map view to locate records physically. *Effort: M.* *(The field is edited in `meta_editor.js` and shown on tracks/release pages; no map view yet.)*
 - [ ] **F14 — Daily wantlist email digest.** Replaces Discogs' "unworkable" relisting spam. Requires backend (B3) — bundle with it. *Effort: S once B3 exists.*
 - [x] **F15 — Volume control.** Requested 2026-11-06. A volume slider + mute in the now-playing bar, remembered between visits. The crossfade must respect it: today it fades to and resets to volume 100, so a naive slider would be overridden at every track change — fades go between 0 and the chosen volume instead, and moving the slider mid-fade scales both players. *Effort: S–M.* *Done 2026-11-06: mute button + range slider (0–100, default 100; arrow keys/Home/End, no global shortcuts) in the now-playing bar; one master volume (`src/volume.js`) for both YouTube players. Fades run from the chosen volume to 0 and 0 to it; moving the slider or muting mid-fade rescales both players at the current point. New tracks and startup use the chosen volume; mute keeps the slider position. Saved in config (`player_volume`, `player_muted`) and in the backup's config section; a restore skips an invalid volume (not a whole number 0–100) or mute (not true/false) and keeps the current one. Narrow screens: at 768 px and below the now-playing bar no longer overflows the screen (the close button used to be pushed off-screen); at 600 px and below it wraps to two rows; at 480 px and below the slider is hidden and only mute stays. Tested in `tests/volume.test.js` (volume maths) and `tests/e2e/volume.spec.js` (fake YouTube API).*
+- [x] **F16 — BPM and key in the queue list.** Requested 2026-11-06. A small BPM value (rounded) and the coloured Camelot key chip beside each track's number in the queue panel, from saved track metadata (analyzer or hand-entered); nothing shown when a track has none. The queue draws at once and the values fill in, so a whole-collection shuffle never waits. *Effort: S.* *Done 2026-11-06: each queue row shows the tempo rounded to a whole number above a compact Camelot chip (no relative key or name), between the row number and the cover; estimates are marked as elsewhere (dimmed number, dashed chip). Screen readers hear one phrase, e.g. "124 BPM, key 8A". A track's record is found by the queue entry's metaId, then release + video, then the video alone (same recording on another release). The panel draws first; track_meta is read once per draw (no cache to go stale), indexed once and filled in one pass, and a result that arrives after a newer draw or after closing is dropped. The column appears only once some queued track has data, then every row reserves it, and filling never changes a row's height or the list's scroll position. Matching/formatting in `src/queue_meta.js`; tested in `tests/queue_meta.test.js` and `tests/e2e/queue.spec.js` (incl. a 3,000-row queue drawn before its data arrives).*
 - [-] **Nearby record store discovery.** Needs a maps API + store database; weak fit, low differentiation. Skip for now.
 
 ---
@@ -320,7 +351,7 @@ serverless/local-first. Nothing here should require a backend.
   structurally (currently only patched at the escaping layer). This is P4.
 - [~] Introduce a build: ES modules (replace global-scope script soup),
   ESLint, Prettier, Vitest. No framework, no heavy bundler lock-in — keep
-  it light. This is P3. *2026-11-06: ESLint + Node's built-in test runner in place (no Vitest needed; no Prettier yet). ES modules not started — P4 removed the main blocker (inline handlers needed global functions).*
+  it light. This is P3. *2026-11-06: ESLint + Node's built-in test runner in place (no Vitest needed; no Prettier yet). ES modules not started — P4 removed the main blocker (inline handlers needed global functions).* **Deferred 2026-11-06, by decision.** Modules would not make the app faster (no bundler; may even be slightly slower) and add little security now that P4 closed the XSS class; their value is safer change — private names instead of silent clashes, explicit dependencies, no hand-ordered `<script>` tags, and practical type checking. That pays off once the project grows (more features, contributors, or the paid version with a backend). The cost is a ~30-file rewrite plus an explicit action registry for `act()` and reworked tests. Until then, lint (no-undef across the shared scope), 196 unit + 27 browser tests and CI cover most of the day-to-day risk. Revisit with type checking (`tsc --checkJs`) as one project.
 - [x] GitHub Actions CI: lint + test + build on every push. The only
   workflow today is `analyzer-release.yml` (desktop analyzer binaries on a
   tag); nothing checks the web app. *Done 2026-11-06: `web-app.yml` runs `npm ci`, lint and tests on every push and PR (skips analyzer/docs-only changes). No build step exists to run yet.*
@@ -328,7 +359,23 @@ serverless/local-first. Nothing here should require a backend.
   `crossfade.js` — pure logic, highest value per hour, currently untested.
   *2026-11-06: testing has started with `tests/video_match.test.js` (11
   passing; `node --test tests/video_match.test.js`, real fixtures) and `tests/data_safety.test.js` (9, M2–M5 and F10). `crossfade.js` now has a first test (`tests/crossfade.test.js`, M1); `harmonic.js` and `store_serial.js` still have none, and the
-  crossfade test covers only the fade length.*
+  crossfade test covers only the fade length.* *2026-11-06 (later): `harmonic.js` and `store_serial.js`
+  now have tests. `tests/harmonic.test.js` (24): Camelot neighbours for every
+  key incl. the 12↔1 wrap and the relative major/minor, input tidying and bad
+  keys; `bpmDelta` straight, half and double time, symmetry, and 0/missing BPM
+  as no match (L3, by design); `scoreCandidate` key/genre/tempo/rating parts;
+  the suggestion ranking with a stand-in DB (order, queue and zero-score
+  exclusion, current-track lookup by release, genre fallback, 20 cap, escaped
+  panel); "Queue" and "Play next". They found L7 and L8 (fixed).
+  `tests/store_serial.test.js` (24): every country alias, case and space
+  handling, two-letter fallback and XX; the prefix (split on "/" and ",",
+  dedupe, sort, two-code cap, empty parts); the next serial (padding, gaps not
+  filled, own prefix only, case, junk serials, past 999); `isSerialTaken`
+  (case, spaces, excluded id); and the bulk serialization. No bugs found there.
+  Open question: Discogs' joint countries such as "UK & Europe" are not split
+  on "&", so they get the XX prefix, and an unknown part takes a slot in a
+  joint prefix ("Unknown / Germany" → DE-XX); the tests record this as current
+  behaviour, since changing it changes the prefix of future serials.*
 
 ### 5b. Portability & polish
 - [ ] PWA: `manifest.json` + service worker → installable, works offline.
@@ -386,3 +433,9 @@ Shipped work that no plan item asked for (found in the 2026-11-06 audit):
 - [x] **Video ↔ track matching** (`src/video_match.js`): picks which of a release's community videos *is* each printed track, folds duplicate uploads, drops mixes/sets/clips; your picks persist as `video_overrides` across re-syncs. First unit-tested module. (`bd13372`)
 - [x] **Video lengths shown as minutes on the release page.** (`ad202d7`)
 
+
+---
+
+## Decisions log
+
+- **2026-11-06:** store serials split joint countries on "&" too ("UK & Europe" → `EU-UK`; future serials only). Harmonic suggestions normalise keys on both sides with `camelotCode()`, so hand-typed "8a", "08A", "Am" now match. The L8 tempo curve is kept as fixed. In the queue, estimated BPM/key stay dimmed/dashed and the BPM/key column appears only once some queued track has data. ES modules deferred (see §5a).

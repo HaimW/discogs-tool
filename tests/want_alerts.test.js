@@ -250,12 +250,15 @@ test('m6 the marketplace poll skips a tick while a collection sync or stats back
 
 test('M2 the for-sale badge escapes a restored currency', async () => {
     const { ctx } = makeApp();
-    const app = { innerHTML: '' };
+    const app = {
+        innerHTML: '', removeAttribute() {}, classList: { remove() {} }, querySelector: () => null,
+    };
     ctx.document = { getElementById: id => (id === 'app' ? app : null), addEventListener() {} };
     // The real view, not the stub, with just enough of the page around it.
-    const FILES_UI = ['src/actions.js', 'src/meta.js', 'src/router.js', 'src/views/wantlist.js'];
+    const FILES_UI = ['src/actions.js', 'src/meta.js', 'src/view_state.js', 'src/router.js', 'src/views/wantlist.js'];
     for (const f of FILES_UI) vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
     ctx.playerReady = false;
+    ctx._currentView = 'wantlist';   // views draw only while on their own route
     await ctx.dbPut('wants', { id: 9, artist: 'A', title: 'T' });
     await ctx.dbPut('marketplace_stats', {
         id: 9, num_for_sale: 2, lowest_price: 5,
