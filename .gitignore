@@ -1,1 +1,9 @@
 split_app.py
+
+# handoff-keeper mod: local session handoffs and plans, never committed
+/HANDOFF.md
+/handoff.md
+/docs/HANDOFF.md
+/docs/handoff.md
+/docs/plans/
+/.claude/HANDOFF.prev.md
