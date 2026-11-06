@@ -42,7 +42,7 @@ function load() {
     // Everything the hand-over touches that is not under test.
     Object.assign(ctx, {
         startViz() { ctx.vizStarted = (ctx.vizStarted || 0) + 1; }, stopViz() {},
-        highlightActiveTrack() {}, _savePlayerState() {}, _renderQueuePanel() {},
+        highlightActiveTrack() {}, _savePlayerState() {}, refreshQueuePanel() {},
         _trackPlayerHeight() {},
     });
     let time = 0;

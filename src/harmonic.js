@@ -202,7 +202,7 @@ function addSuggestionToQueue(idx) {
     if (!c) return;
     currentQueue.push({ youtubeId: c.youtubeId, releaseId: c.releaseId || null, title: c.title, artist: c.artist, cover: c.cover });
     _savePlayerState();
-    if (document.getElementById('queue-panel')) _renderQueuePanel();
+    refreshQueuePanel({ reveal: false });
     showToast('Queued: ' + c.title);
 }
 

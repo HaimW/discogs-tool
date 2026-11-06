@@ -26,7 +26,8 @@ function addTrackToSetlist(setlistId, track) {
             artist: track.artist || '',
             cover: track.cover || '',
             releaseId: track.releaseId || null,
-            metaId: track.metaId || null
+            // Filled from release + video when the caller had none (F18).
+            metaId: itemMetaId(track)
         });
         sl.updated_at = new Date().toISOString();
         return dbPut('setlists', sl).then(function () {
@@ -229,8 +230,8 @@ function openNowPlayingAddToSetlist(btn) {
             title: cur.title,
             artist: cur.artist,
             cover: cur.cover,
-            releaseId: vid ? vid.release_id : null,
-            metaId: vid ? (vid.release_id + '_' + vid.youtube_id) : null
+            releaseId: vid ? vid.release_id : (cur.releaseId || null),
+            metaId: vid ? trackMetaId(vid.release_id, vid.youtube_id) : (cur.metaId || null)
         };
         _openSetlistPopoverForTrack(btn, track);
     });
@@ -302,6 +303,105 @@ function renderSetlists() {
 
 // ------ Setlist detail view ------
 
+// The track list is a table (F18): every row shares one column template
+// (style.css, .setlist-tracklist), so BPM, key, energy and rating line up down
+// the list, and a value that is missing keeps its cell. ARIA table roles make
+// a screen reader announce each value with its column name.
+
+// An empty metadata cell: a dim dash to the eye, "none" to a screen reader.
+var SETLIST_NONE = '<span class="sl-none" aria-hidden="true">&ndash;</span><span class="sr-only">none</span>';
+
+// The tempo as stored, to one decimal place at most ("124", "122.5").
+function setlistBpmText(meta) {
+    if (!meta || meta.bpm == null || meta.bpm === '') return '';
+    var n = Number(meta.bpm);
+    if (!isFinite(n) || n <= 0) return '';
+    return String(Math.round(n * 10) / 10);
+}
+
+// The four metadata cells of a row: BPM, key, energy, rating. The estimate
+// markers (dashed border, "~") are the same as on the release page.
+function setlistMetaCellsHtml(meta) {
+    meta = meta || {};
+    var html = '';
+    var bpm = setlistBpmText(meta);
+    html += '<span class="sl-cell sl-c-bpm" role="cell">';
+    if (bpm) {
+        var estBpm = meta.bpm_source === 'analysis' && !meta.bpm_verified;
+        html += '<span class="track-badge badge-bpm' + (estBpm ? ' badge-estimated' : '') + '"' +
+            ' title="' + (estBpm ? 'Estimated by analysis' : 'BPM') + '">' + escHtml(bpm) +
+            // Always there, so estimated and confirmed figures end at the same x.
+            '<span class="badge-est" aria-hidden="true">' + (estBpm ? '~' : '') + '</span>' +
+            (estBpm ? '<span class="sr-only"> (estimated)</span>' : '') +
+            '</span>';
+    } else {
+        html += SETLIST_NONE;
+    }
+    html += '</span>';
+
+    var key = camelotCode(meta.key) || camelotCode(meta.key_musical);
+    html += '<span class="sl-cell sl-c-key" role="cell">';
+    // Name and relative key ride along as elsewhere; narrow screens hide both
+    // (style.css), leaving the code.
+    html += key ? camelotChip(key, {
+        estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
+        musical: meta.key_musical || true
+    }) : SETLIST_NONE;
+    html += '</span>';
+
+    html += '<span class="sl-cell sl-c-energy" role="cell">' + (energyBadge(meta) || SETLIST_NONE) + '</span>';
+
+    var rating = Math.max(0, Math.min(5, parseInt(meta.rating, 10) || 0));
+    html += '<span class="sl-cell sl-c-rating" role="cell">';
+    html += rating
+        ? '<span class="track-badge badge-rating" title="Rating ' + rating + ' of 5">' +
+            '<span aria-hidden="true">' + ratingStars(rating) + '</span>' +
+            '<span class="sr-only">' + rating + ' of 5</span></span>'
+        : SETLIST_NONE;
+    html += '</span>';
+    return html;
+}
+
+// The whole track table: a header row, then one row per track. Only the
+// track rows are .setlist-row (initSetlistDragDrop counts those).
+function setlistTableHtml(sl, index) {
+    var tracks = sl.tracks || [];
+    var html = '<div class="setlist-tracklist" role="table" aria-label="Tracks in ' + escHtml(sl.name) + '">';
+    html += '<div class="setlist-head" role="row">' +
+        '<span class="sl-cell sl-c-handle" role="columnheader"><span class="sr-only">Drag</span></span>' +
+        '<span class="sl-cell sl-c-num" role="columnheader">#</span>' +
+        '<span class="sl-cell sl-c-play" role="columnheader"><span class="sr-only">Play</span></span>' +
+        '<span class="sl-cell sl-c-cover" role="columnheader"><span class="sr-only">Cover</span></span>' +
+        '<span class="sl-cell sl-c-title" role="columnheader">Track</span>' +
+        '<span class="sl-cell sl-c-bpm" role="columnheader">BPM</span>' +
+        '<span class="sl-cell sl-c-key" role="columnheader">Key</span>' +
+        '<span class="sl-cell sl-c-energy" role="columnheader">Energy</span>' +
+        '<span class="sl-cell sl-c-rating" role="columnheader">Rating</span>' +
+        '<span class="sl-cell sl-c-remove" role="columnheader"><span class="sr-only">Remove</span></span>' +
+        '</div>';
+    tracks.forEach(function (t, i) {
+        var meta = queueItemMeta(t, index);
+        html += '<div class="video-item setlist-row" role="row" draggable="true" data-index="' + i + '" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + escHtml(t.releaseId == null ? '' : t.releaseId) + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
+            '<span class="sl-cell sl-c-handle" role="cell"><span class="drag-handle" title="Drag to reorder" aria-hidden="true">&#8942;</span></span>' +
+            '<span class="sl-cell sl-c-num setlist-num" role="cell">' + (i + 1) + '</span>' +
+            '<span class="sl-cell sl-c-play" role="cell"><button class="play-btn"' + act('click', 'playFromSetlist', [sl.id, i]) +
+                ' aria-label="Play ' + escHtml(t.title) + '"><span class="play-icon" aria-hidden="true">&#9654;</span></button></span>';
+        html += '<span class="sl-cell sl-c-cover" role="cell">' + (t.cover
+            ? '<img class="track-thumb" src="' + escHtml(t.cover) + '" alt="" loading="lazy" draggable="false">'
+            : '<span class="track-thumb no-thumb" aria-hidden="true">&#9898;</span>') + '</span>';
+        html += '<span class="sl-cell sl-c-title track-info" role="cell">' +
+            '<span class="track-title-line" title="' + escHtml(t.title) + '">' + escHtml(t.title) + '</span>' +
+            '<span class="track-sub-line">' + escHtml(t.artist || '') + '</span>' +
+            '</span>';
+        html += setlistMetaCellsHtml(meta);
+        html += '<span class="sl-cell sl-c-remove" role="cell"><button class="meta-btn"' + act('click', 'removeTrackFromSetlist', [sl.id, i]) +
+            ' title="Remove" aria-label="Remove ' + escHtml(t.title) + '">&times;</button></span>';
+        html += '</div>';
+    });
+    html += '</div>';
+    return html;
+}
+
 function renderSetlist(setlistId) {
     var tok = startViewRender('setlist', setlistId);
     if (!setlistId) { navigate('setlists'); return; }
@@ -309,8 +409,6 @@ function renderSetlist(setlistId) {
         if (!viewRenderIsCurrent(tok)) return;
         var sl = results[0];
         if (!sl) { navigate('setlists'); return; }
-        var metaById = {};
-        results[1].forEach(function (m) { metaById[m.id] = m; });
         var tracks = sl.tracks || [];
 
         var html = '<span class="back-link"' + act('click', 'navigate', ['setlists']) + '>&larr; Back to setlists</span>';
@@ -321,7 +419,7 @@ function renderSetlist(setlistId) {
                 '<button class="btn btn-play-all"' + (tracks.length === 0 ? ' disabled' : '') + act('click', 'playSetlist', [sl.id]) + '>&#9654; Play all</button>' +
                 '<div class="setlist-export">' +
                     '<button class="btn"' + (tracks.length === 0 ? ' disabled' : '') + act('click', 'toggleExportMenu', [sl.id]) + '>Export &#9662;</button>' +
-                    '<div class="export-menu popover" id="export-menu-' + sl.id + '" style="display:none;">' +
+                    '<div class="export-menu popover" id="export-menu-' + escHtml(sl.id) + '" style="display:none;">' +
                         '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'm3u']) + '>M3U playlist</div>' +
                         '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'txt']) + '>Plain text (.txt)</div>' +
                         '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'csv']) + '>CSV with BPM/key</div>' +
@@ -337,40 +435,7 @@ function renderSetlist(setlistId) {
                 '<p class="empty-subtitle">Add tracks with the + button on a release page or in Tracks.</p>' +
                 '<button class="btn btn-primary"' + act('click', 'navigate', ['tracks']) + '>Browse tracks</button></div>';
         } else {
-            html += '<div class="video-list setlist-tracklist">';
-            tracks.forEach(function (t, i) {
-                var meta = metaById[t.metaId] || {};
-                html += '<div class="video-item setlist-row" draggable="true" data-index="' + i + '" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + (t.releaseId || '') + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
-                    '<span class="drag-handle" title="Drag to reorder">&#8942;</span>' +
-                    '<span class="setlist-num">' + (i + 1) + '</span>' +
-                    '<button class="play-btn"' + act('click', 'playFromSetlist', [sl.id, i]) + '><span class="play-icon">&#9654;</span></button>';
-                if (t.cover) {
-                    html += '<img class="track-thumb" src="' + escHtml(t.cover) + '" alt="" loading="lazy">';
-                } else {
-                    html += '<div class="track-thumb no-thumb">&#9898;</div>';
-                }
-                html += '<div class="track-info">' +
-                    '<div class="track-title-line">' + escHtml(t.title) + '</div>' +
-                    '<div class="track-sub-line">' + escHtml(t.artist || '') + '</div>' +
-                    '</div>';
-                html += '<span class="track-badges">';
-                // Same badges as the release page. A setlist is where the key
-                // and energy matter most — it is the running order — so the two
-                // views showing different amounts of information would be odd.
-                if (meta.bpm != null) html += bpmBadge(meta);
-                if (meta.key) {
-                    html += camelotChip(meta.key, {
-                        estimated: meta.key_source === 'analysis' && !meta.bpm_verified,
-                        musical: meta.key_musical || true
-                    });
-                }
-                html += energyBadge(meta);
-                if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
-                html += '</span>';
-                html += '<button class="meta-btn"' + act('click', 'removeTrackFromSetlist', [sl.id, i]) + ' title="Remove">&times;</button>';
-                html += '</div>';
-            });
-            html += '</div>';
+            html += setlistTableHtml(sl, setlistMetaIndex(results[1]));
         }
         html += '</div>';
         document.getElementById('app').innerHTML = html;
@@ -378,12 +443,21 @@ function renderSetlist(setlistId) {
     }));
 }
 
+// The queue items for a setlist's tracks. metaId rides along so the queue
+// panel finds the same metadata the setlist shows.
+function setlistQueueItems(sl) {
+    return (sl.tracks || []).map(function (t) {
+        return {
+            youtubeId: t.youtubeId, releaseId: t.releaseId || null, metaId: t.metaId || null,
+            title: t.title, artist: t.artist || '', cover: t.cover || ''
+        };
+    });
+}
+
 function playSetlist(id) {
     dbGet('setlists', id).then(function (sl) {
         if (!sl || !sl.tracks || sl.tracks.length === 0) return;
-        currentQueue = sl.tracks.map(function (t) {
-            return { youtubeId: t.youtubeId, releaseId: t.releaseId || null, title: t.title, artist: t.artist || '', cover: t.cover || '' };
-        });
+        currentQueue = setlistQueueItems(sl);
         currentIndex = 0;
         loadFromQueue(0);
     });
@@ -392,9 +466,7 @@ function playSetlist(id) {
 function playFromSetlist(id, idx) {
     dbGet('setlists', id).then(function (sl) {
         if (!sl || !sl.tracks || sl.tracks.length === 0) return;
-        currentQueue = sl.tracks.map(function (t) {
-            return { youtubeId: t.youtubeId, releaseId: t.releaseId || null, title: t.title, artist: t.artist || '', cover: t.cover || '' };
-        });
+        currentQueue = setlistQueueItems(sl);
         currentIndex = idx;
         loadFromQueue(idx);
     });

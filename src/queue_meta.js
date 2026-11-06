@@ -34,18 +34,61 @@ function queueMetaParts(meta) {
     return { bpm: bpm, key: key };
 }
 
-// Index the track_meta records that have something to show, by id and by video.
-// When several releases carry the same video, the first record with data wins.
-function queueMetaIndex(metas) {
+// Index track_meta records by id and by video. `hasData(m)` says which records
+// count (the queue: BPM or key; setlists: any of BPM, key, energy, rating).
+// When several releases carry the same video, the video entry goes to the
+// first record with a BPM or key, else the first one that counts at all.
+function _metaIndex(metas, hasData) {
     var byId = Object.create(null);
     var byVideo = Object.create(null);
+    var videoHasTempoOrKey = Object.create(null);
     (metas || []).forEach(function (m) {
-        if (!m || m.id == null || !queueMetaParts(m)) return;
+        if (!m || m.id == null || !hasData(m)) return;
         byId[m.id] = m;
         var vid = _queueMetaVideoId(m);
-        if (vid && !Object.prototype.hasOwnProperty.call(byVideo, vid)) byVideo[vid] = m;
+        if (!vid || videoHasTempoOrKey[vid]) return;
+        var strong = !!queueMetaParts(m);
+        if (strong || !Object.prototype.hasOwnProperty.call(byVideo, vid)) {
+            byVideo[vid] = m;
+            if (strong) videoHasTempoOrKey[vid] = true;
+        }
     });
     return { byId: byId, byVideo: byVideo };
+}
+
+// The queue's index: only records with a BPM or a key (what a queue row shows).
+function queueMetaIndex(metas) {
+    return _metaIndex(metas, queueMetaParts);
+}
+
+// Whether a record has anything a setlist row shows: BPM, key, energy, rating.
+function setlistMetaHasData(m) {
+    if (!m) return false;
+    if (queueMetaParts(m)) return true;
+    var energy = parseInt(m.energy, 10);
+    if (isFinite(energy) && energy > 0) return true;
+    var rating = parseInt(m.rating, 10);
+    return isFinite(rating) && rating > 0;
+}
+
+// The setlist index (F18): like the queue's, but energy- or rating-only records
+// count too, so those rows still show what there is. Look items up with
+// queueItemMeta.
+function setlistMetaIndex(metas) {
+    return _metaIndex(metas, setlistMetaHasData);
+}
+
+// The metaId to store with a track saved to a setlist: its own, or the
+// canonical "<releaseId>_<youtubeId>" when it knows its release. No record
+// needs to exist yet: the id is where the metadata editor would put one, and
+// the lookup above falls back to the video when it finds nothing there.
+function itemMetaId(item) {
+    if (!item) return null;
+    if (item.metaId) return item.metaId;
+    if (item.releaseId != null && item.releaseId !== '' && item.youtubeId) {
+        return trackMetaId(item.releaseId, item.youtubeId);
+    }
+    return null;
 }
 
 // The record for a queue item: its metaId, then release + video, then video.

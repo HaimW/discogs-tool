@@ -425,28 +425,36 @@ function exportSetlistTxt(id) {
     });
 }
 
+// The CSV text for a setlist. Metadata is found the way the setlist view finds
+// it (F18): the track's metaId, then release + video, then the video alone.
+function setlistCsv(sl, metas) {
+    var index = setlistMetaIndex(metas);
+    var lines = ['order,artist,title,release_id,youtube_id,youtube_url,bpm,key,energy,rating'];
+    (sl.tracks || []).forEach(function (t, i) {
+        var m = queueItemMeta(t, index) || {};
+        lines.push([
+            i + 1,
+            _csvCell(t.artist || ''),
+            _csvCell(t.title || ''),
+            _csvCell(t.releaseId == null ? '' : t.releaseId),
+            _csvCell(t.youtubeId),
+            _csvCell('https://www.youtube.com/watch?v=' + t.youtubeId),
+            m.bpm != null ? _csvCell(m.bpm) : '',
+            // The Camelot code, also when only a musical name ("A minor") is stored;
+            // an unrecognised stored key is kept as written rather than dropped.
+            _csvCell(camelotCode(m.key) || camelotCode(m.key_musical) || m.key || ''),
+            m.energy != null ? _csvCell(m.energy) : '',
+            _csvCell(m.rating || '')
+        ].join(','));
+    });
+    return lines.join('\n') + '\n';
+}
+
 function exportSetlistCsv(id) {
     Promise.all([dbGet('setlists', id), dbGetAll('track_meta')]).then(function (results) {
         var sl = results[0];
         if (!sl) return;
-        var metaById = {};
-        results[1].forEach(function (m) { metaById[m.id] = m; });
-        var lines = ['order,artist,title,release_id,youtube_id,youtube_url,bpm,key,rating'];
-        (sl.tracks || []).forEach(function (t, i) {
-            var m = metaById[t.metaId] || {};
-            lines.push([
-                i + 1,
-                _csvCell(t.artist || ''),
-                _csvCell(t.title || ''),
-                t.releaseId || '',
-                t.youtubeId,
-                'https://www.youtube.com/watch?v=' + t.youtubeId,
-                m.bpm != null ? m.bpm : '',
-                m.key || '',
-                m.rating || ''
-            ].join(','));
-        });
-        downloadBlob(slugifySetlist(sl.name) + '.csv', 'text/csv', lines.join('\n') + '\n');
+        downloadBlob(slugifySetlist(sl.name) + '.csv', 'text/csv', setlistCsv(sl, results[1]));
     });
 }
 

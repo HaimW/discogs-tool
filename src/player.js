@@ -58,7 +58,6 @@ function onPlayerStateChange(event) {
         if (currentIndex < currentQueue.length - 1) {
             currentIndex++;
             loadFromQueue(currentIndex);
-            if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
         } else {
             isPlaying = false;
             stopViz();
@@ -81,7 +80,8 @@ function onPlayerStateChange(event) {
             updatePlayPauseBtn();
             _savePlayerState();
             if (cfEnabled) setTimeout(_preloadNextTrack, 800);
-            if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
+            // The hand-over changed the current track without loadFromQueue.
+            refreshQueuePanel();
             return;
         }
         // YouTube may not carry the volume over a new video (src/volume.js):
@@ -109,7 +109,6 @@ function onPlayerError(event) {
     if (currentIndex < currentQueue.length - 1) {
         currentIndex++;
         loadFromQueue(currentIndex);
-        if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' });
     } else {
         isPlaying = false;
         stopViz();
@@ -185,21 +184,32 @@ function highlightActiveTrack() {
     }
 }
 
-function loadFromQueue(index) {
+// Plays queue entry `index`. Every way of starting a track (a click on a
+// track, Play all, a setlist, the want list, Play next, Next/Prev, a track
+// ending) sets currentQueue/currentIndex and comes through here, so this is
+// also where an open queue panel is redrawn (L10): no caller can forget it,
+// and none redraws it a second time. `panel` is passed to refreshQueuePanel
+// (src/queue.js): by default the new current row is scrolled into view only if
+// it is hidden.
+function loadFromQueue(index, panel) {
     var item = currentQueue[index];
-    if (!item || !playerReady) return;
-    if (_cfState !== 'idle') _abortCrossfade();
-    _applyVolumeNow();
-    player.loadVideoById(item.youtubeId);
-    showNowPlaying(item.title, item.artist, item.cover);
-    isPlaying = true;
-    updatePlayPauseBtn();
-    _savePlayerState();
-    if (cfEnabled) {
-        _cfState = 'idle';
-        _cfPreloadedIndex = -1;
-        setTimeout(_preloadNextTrack, 800);
+    if (item && playerReady) {
+        if (_cfState !== 'idle') _abortCrossfade();
+        _applyVolumeNow();
+        player.loadVideoById(item.youtubeId);
+        showNowPlaying(item.title, item.artist, item.cover);
+        isPlaying = true;
+        updatePlayPauseBtn();
+        _savePlayerState();
+        if (cfEnabled) {
+            _cfState = 'idle';
+            _cfPreloadedIndex = -1;
+            setTimeout(_preloadNextTrack, 800);
+        }
     }
+    // Also when there is no item or no player yet, on purpose: the panel
+    // still follows the queue, and closes once the queue is empty.
+    refreshQueuePanel(panel);
 }
 
 // The rows a click on a page queues up. A list marked data-queue-scope (the
@@ -361,8 +371,8 @@ function shufflePlay(limitOverride) {
                 };
             });
             currentIndex = 0;
-            loadFromQueue(0);
-            _renderQueuePanel({ reveal: 'open' });  // Auto-open queue so the shuffled list is immediately visible
+            // Opens the queue too, so the shuffled list is visible at once.
+            loadFromQueue(0, { reveal: 'open', open: true });
         });
     });
 }

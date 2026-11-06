@@ -304,3 +304,343 @@ test('queue: the panel draws before BPM/key arrive, and filling them moves nothi
     expect(Math.abs((await scrollTop(page)) - mid)).toBeLessThanOrEqual(1);
     expect(await page.evaluate((sel) => document.querySelector(sel).scrollHeight, LIST)).toBe(heightBefore);
 });
+
+// ---------- L10: every queue change redraws an open panel ----------
+
+const rowTitles = (page) => page.locator(LIST + ' .queue-row .track-title-line').allTextContents();
+const currentTitle = (page) => page.locator(LIST + ' .queue-current .track-title-line').textContent();
+
+test('queue: an open panel follows Play next, a setlist, the want list and a track click', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 3, 0);
+    await openPanel(page);
+    await expect(page.locator(LIST + ' .queue-row')).toHaveCount(3);
+
+    // Harmonic "Play next": inserted after the current track and played.
+    await page.evaluate(() => {
+        window._suggestions = [{ youtubeId: 'vsuggest001', releaseId: 9, title: 'Suggested', artist: 'S', cover: '' }];
+        playNextSuggestion(0);
+    });
+    await expect(page.locator('#np-title')).toHaveText('Suggested');
+    expect(await rowTitles(page)).toEqual(['Track 1', 'Suggested', 'Track 2', 'Track 3']);
+    expect(await currentTitle(page)).toBe('Suggested');
+
+    // A setlist's Play all, then one of its rows.
+    const slId = 4242;
+    await page.evaluate((id) => dbPut('setlists', {
+        id, name: 'Set', created_at: '2026-01-01', updated_at: '2026-01-01', notes: '',
+        tracks: [{ youtubeId: 'vset0000001', title: 'Set A', artist: 'X' }, { youtubeId: 'vset0000002', title: 'Set B', artist: 'X' }],
+    }), slId);
+    await page.evaluate((id) => playSetlist(id), slId);
+    await expect(page.locator('#np-title')).toHaveText('Set A');
+    await expect.poll(() => rowTitles(page)).toEqual(['Set A', 'Set B']);
+    expect(await currentTitle(page)).toBe('Set A');
+    await page.evaluate((id) => playFromSetlist(id, 1), slId);
+    await expect(page.locator('#np-title')).toHaveText('Set B');
+    await expect.poll(() => currentTitle(page)).toBe('Set B');
+
+    // Want list: a release's videos.
+    await page.evaluate(async () => {
+        await dbPut('wants', { id: 500, title: 'Wanted', artist: 'W', video_count: 2 });
+        await dbPut('videos', { release_id: 500, youtube_id: 'vwant000001', title: 'Want 1' });
+        await dbPut('videos', { release_id: 500, youtube_id: 'vwant000002', title: 'Want 2' });
+        wlPlayRelease(500);
+    });
+    await expect(page.locator('#np-title')).toHaveText(/Want [12]/);
+    await expect.poll(async () => (await rowTitles(page)).sort()).toEqual(['Want 1', 'Want 2']);
+
+    // A click on a track row on a page.
+    await page.evaluate(() => {
+        const box = document.createElement('div');
+        box.id = 'e2e-tracks';
+        box.innerHTML = '<div class="video-item" data-youtube-id="vclick00001" data-title="Click 1"></div>' +
+            '<div class="video-item" data-youtube-id="vclick00002" data-title="Click 2"></div>';
+        document.getElementById('app').appendChild(box);
+        playTrack(box.children[1]);
+    });
+    await expect(page.locator('#np-title')).toHaveText('Click 2');
+    expect(await rowTitles(page)).toEqual(['Click 1', 'Click 2']);
+    expect(await currentTitle(page)).toBe('Click 2');
+});
+
+// ---------- F17: reordering the queue ----------
+
+const titles = (page) => page.locator(LIST + ' .queue-row .track-title-line').allTextContents();
+const state = (page) => page.evaluate(() => ({
+    currentIndex: window.currentIndex,
+    current: window.currentQueue[window.currentIndex].title,
+    playing: window.__ytPlayers[0].videoId,
+    saved: JSON.parse(sessionStorage.getItem('playerState')).queue.map((q) => q.title),
+}));
+const focused = (page) => page.evaluate(() => {
+    const a = document.activeElement;
+    const r = a && a.closest('.queue-row');
+    return r ? { row: Array.prototype.indexOf.call(r.parentNode.children, r), cls: a.className.replace('btn ', '') } : null;
+});
+
+test('queue: dragging a row by its handle reorders the queue; playback, list and panel stay put', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 60, 2);
+    await openPanel(page);
+    await settle(page);
+    const mid = await setScrollTop(page, 600);
+    const shown = await visibleRows(page);
+    const [a, b] = [shown[1], shown[4]];
+    const box = await page.locator('#queue-panel').boundingBox();
+
+    // Drag row a's handle onto the lower half of row b: it lands after b.
+    const target = row(page, b);
+    const tb = await target.boundingBox();
+    await row(page, a).locator('.queue-drag-handle').dragTo(target, { targetPosition: { x: tb.width / 2, y: tb.height - 4 } });
+    await expect.poll(() => titles(page).then((t) => t[b])).toBe('Track ' + (a + 1));
+    const t = await titles(page);
+    expect(t[b - 1]).toBe('Track ' + (b + 1));
+    expect(t[a]).toBe('Track ' + (a + 2));
+    expect(t).toHaveLength(60);
+
+    // The playing track (row 2, above the move) is unchanged and highlighted.
+    const s = await state(page);
+    expect(s.current).toBe('Track 3');
+    expect(s.currentIndex).toBe(2);
+    expect(s.playing).toBe('v0000000003');
+    expect(s.saved, 'saved for a reload').toEqual(t);
+    expect(await currentRow(page)).toBe(2);
+    await expect(page.locator('#np-title')).toHaveText('Track 3');
+
+    await settle(page);
+    expect(Math.abs((await scrollTop(page)) - mid), 'the list did not move').toBeLessThanOrEqual(1);
+    const after = await page.locator('#queue-panel').boundingBox();
+    expect(Math.abs(after.x - box.x) + Math.abs(after.y - box.y), 'the panel did not move').toBeLessThanOrEqual(1);
+    await expect(page.locator(LIST + ' .dragging, ' + LIST + ' .drag-over-above, ' + LIST + ' .drag-over-below')).toHaveCount(0);
+
+    // Moving the playing track itself: currentIndex follows it.
+    await setScrollTop(page, 0);
+    const r5 = await row(page, 5).boundingBox();
+    await row(page, 2).locator('.queue-drag-handle').dragTo(row(page, 5), { targetPosition: { x: r5.width / 2, y: r5.height - 4 } });
+    await expect.poll(() => currentRow(page)).toBe(5);
+    expect((await state(page)).current).toBe('Track 3');
+    expect((await state(page)).playing).toBe('v0000000003');
+});
+
+test('queue: a drag from the header moves the panel, never a row; a row drag never moves the panel', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 5, 0);
+    await openPanel(page);
+    const before = await titles(page);
+    const title = await page.locator('#queue-panel .queue-title').boundingBox();
+    const box = await page.locator('#queue-panel').boundingBox();
+    // Header dragged down over the rows and dropped there.
+    await page.mouse.move(title.x + 10, title.y + title.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(title.x - 90, title.y + 120, { steps: 6 });
+    await page.mouse.up();
+    const moved = await page.locator('#queue-panel').boundingBox();
+    expect(Math.abs(moved.x - (box.x - 100))).toBeLessThanOrEqual(2);
+    expect(await titles(page)).toEqual(before);
+
+    // A press-and-drag on a row's title (not the handle) does nothing.
+    const t = await row(page, 0).locator('.track-title-line').boundingBox();
+    await page.mouse.move(t.x + 5, t.y + 5);
+    await page.mouse.down();
+    await page.mouse.move(t.x + 5, t.y + 140, { steps: 6 });
+    await page.mouse.up();
+    expect(await titles(page)).toEqual(before);
+    const still = await page.locator('#queue-panel').boundingBox();
+    expect(Math.abs(still.x - moved.x) + Math.abs(still.y - moved.y)).toBeLessThanOrEqual(1);
+
+    // A handle drag reorders and leaves the panel where it was.
+    const r3 = await row(page, 3).boundingBox();
+    await row(page, 0).locator('.queue-drag-handle').dragTo(row(page, 3), { targetPosition: { x: r3.width / 2, y: r3.height - 4 } });
+    await expect.poll(() => titles(page)).toEqual(['Track 2', 'Track 3', 'Track 4', 'Track 1', 'Track 5']);
+    const end = await page.locator('#queue-panel').boundingBox();
+    expect(Math.abs(end.x - moved.x) + Math.abs(end.y - moved.y)).toBeLessThanOrEqual(1);
+    expect(await currentRow(page), 'the playing track moved with the drag').toBe(3);
+});
+
+// Drag events built by hand, for what a real mouse cannot do on demand: a drag
+// whose dragend never comes, or a drop carrying someone else's data.
+// fireDrag(page, 'dragstart', i) starts a row drag from row i's handle;
+// fireDrag(page, 'dragover' | 'drop', i, { lower, types }) fires on row i with
+// a DataTransfer holding `types` (default: the queue's own) and returns
+// whether the list took it (preventDefault).
+const fireDrag = (page, type, i, opts) => page.evaluate(([t, idx, o]) => {
+    const list = document.querySelector('#queue-panel .queue-list');
+    const r = list.querySelectorAll('.queue-row')[idx];
+    const dt = new DataTransfer();
+    const types = (o && o.types) || [QUEUE_DRAG_TYPE];
+    types.forEach((ty) => dt.setData(ty, 'x'));
+    const b = r.getBoundingClientRect();
+    const target = t === 'dragstart' ? r.querySelector('.queue-drag-handle') : r;
+    const ev = new DragEvent(t, {
+        bubbles: true, cancelable: true, dataTransfer: dt,
+        clientX: b.left + b.width / 2, clientY: o && o.lower ? b.bottom - 4 : b.top + 4,
+    });
+    target.dispatchEvent(ev);
+    return ev.defaultPrevented;
+}, [type, i, opts || null]);
+
+test('queue: a drag whose dragend got lost in a redraw cannot move a row on a later foreign drop', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 6, 0);
+    await openPanel(page);
+    const before = await titles(page);
+
+    // A row drag starts, then the panel is redrawn under it (a track ended)
+    // and no dragend ever arrives.
+    await fireDrag(page, 'dragstart', 1);
+    expect(await page.evaluate(() => !!window._queueDrag)).toBe(true);
+    await page.evaluate(() => refreshQueuePanel({ reveal: false }));
+    expect(await page.evaluate(() => !!window._queueDrag), 'stale drag left behind').toBe(true);
+
+    // Text dragged in from elsewhere: no drop indicator, no drop, no move.
+    expect(await fireDrag(page, 'dragover', 4, { lower: true, types: ['text/plain'] })).toBe(false);
+    await expect(page.locator(LIST + ' .drag-over-above, ' + LIST + ' .drag-over-below')).toHaveCount(0);
+    expect(await fireDrag(page, 'drop', 4, { lower: true, types: ['text/plain'] })).toBe(false);
+    await settle(page);
+    expect(await titles(page)).toEqual(before);
+
+    // A new row drag clears the stale one and works as usual.
+    await fireDrag(page, 'dragstart', 0);
+    expect(await fireDrag(page, 'dragover', 2, { lower: true })).toBe(true);
+    expect(await fireDrag(page, 'drop', 2, { lower: true })).toBe(true);
+    await expect.poll(() => titles(page).then((t) => t.slice(0, 3))).toEqual(['Track 2', 'Track 3', 'Track 1']);
+});
+
+test('queue: after a drag, focus stays on the track that had it, not on its old row', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 6, 0);
+    await openPanel(page);
+    // Track 3's play button has focus; Track 1 is dragged below Track 4,
+    // which moves Track 3 up a row.
+    await row(page, 2).locator('.queue-play-btn').focus();
+    await fireDrag(page, 'dragstart', 0);
+    await fireDrag(page, 'dragover', 3, { lower: true });
+    await fireDrag(page, 'drop', 3, { lower: true });
+    await expect.poll(() => titles(page).then((t) => t.slice(0, 4))).toEqual(['Track 2', 'Track 3', 'Track 4', 'Track 1']);
+    expect(await focused(page)).toEqual({ row: 1, cls: 'queue-play-btn' });
+    expect(await page.evaluate(() => document.activeElement.closest('.queue-row').querySelector('.track-title-line').textContent)).toBe('Track 3');
+});
+
+test('queue: move buttons and Alt+Up/Down reorder from the keyboard, keep focus and announce the move', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 10, 4);
+    await openPanel(page);
+    const live = page.locator('#queue-live');
+
+    // Up button on row 6 (Track 7): it moves above the playing Track 5.
+    await row(page, 6).locator('.queue-up-btn').focus();
+    await page.keyboard.press('Enter');
+    await expect.poll(() => titles(page).then((t) => t[5])).toBe('Track 7');
+    expect(await focused(page)).toEqual({ row: 5, cls: 'queue-up-btn' });
+    await expect(live).toHaveText('Moved Track 7 to position 6 of 10');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => titles(page).then((t) => t[4])).toBe('Track 7');
+    expect(await focused(page)).toEqual({ row: 4, cls: 'queue-up-btn' });
+    expect(await currentRow(page), 'Track 5 pushed down, still current').toBe(5);
+    expect((await state(page)).current).toBe('Track 5');
+
+    // Alt+Down / Alt+Up on whichever row button has focus.
+    await row(page, 0).locator('.queue-play-btn').focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(() => titles(page).then((t) => t.slice(0, 3))).toEqual(['Track 2', 'Track 3', 'Track 1']);
+    expect(await focused(page)).toEqual({ row: 2, cls: 'queue-play-btn' });
+    await expect(live).toHaveText('Moved Track 1 to position 3 of 10');
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect.poll(() => titles(page).then((t) => t[1])).toBe('Track 1');
+    expect(await focused(page)).toEqual({ row: 1, cls: 'queue-play-btn' });
+
+    // At the top: nothing moves, focus stays, and it says why.
+    await row(page, 0).locator('.queue-up-btn').focus();
+    await expect(row(page, 0).locator('.queue-up-btn')).toHaveAttribute('aria-disabled', 'true');
+    const before = await titles(page);
+    await page.keyboard.press('Enter');
+    await expect(live).toHaveText('Track 2 is already first');
+    expect(await titles(page)).toEqual(before);
+    expect(await focused(page)).toEqual({ row: 0, cls: 'queue-up-btn' });
+    await expect(row(page, 9).locator('.queue-down-btn')).toHaveAttribute('aria-disabled', 'true');
+
+    // The buttons are named for screen readers.
+    await expect(row(page, 3).getByRole('button', { name: 'Move Track 4 down' })).toHaveCount(1);
+});
+
+test('queue: a keyboard move past the edge of the list scrolls just enough to follow it', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 60, 0);
+    await openPanel(page);
+    await settle(page);
+    await setScrollTop(page, 0);
+    const shown = await visibleRows(page);
+    const lastShown = shown[shown.length - 1];
+    await row(page, lastShown).locator('.queue-down-btn').focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(() => focused(page)).toEqual({ row: lastShown + 1, cls: 'queue-down-btn' });
+    expect(await rowVisible(page, lastShown + 1)).toBe(true);
+    expect(await page.evaluate(() => window.scrollY), 'the page itself does not scroll').toBe(0);
+});
+
+test.describe('on a touch screen', () => {
+    test.use({ hasTouch: true, viewport: { width: 360, height: 740 } });
+
+    test('queue: the move buttons are finger-sized and the handle is hidden', async ({ page }) => {
+        await openApp(page);
+        await playQueue(page, 4, 0);
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+        await page.locator('#np-queue').tap();
+        await expect(page.locator('#queue-panel')).toBeVisible();
+        await expect(row(page, 0).locator('.queue-drag-handle')).toBeHidden();
+        const up = await row(page, 1).locator('.queue-up-btn').boundingBox();
+        expect(up.width).toBeGreaterThanOrEqual(32);
+        expect(up.height).toBeGreaterThanOrEqual(24);
+        await row(page, 1).locator('.queue-up-btn').tap();
+        await expect.poll(() => titles(page).then((t) => t.slice(0, 2))).toEqual(['Track 2', 'Track 1']);
+        expect(await currentRow(page)).toBe(1);
+    });
+});
+
+test('queue: a reorder re-cues the crossfade when the next track changes, and never breaks a fade', async ({ page }) => {
+    await openApp(page);
+    await playQueue(page, 6, 1);
+    // Crossfade on, 30 s fade (the longest), so the fade below lasts.
+    await page.locator('#np-cf-toggle').click();
+    await page.locator('#np-cf-seconds').fill('30');
+    await page.locator('#np-cf-seconds').dispatchEvent('change');
+    await expect.poll(() => page.evaluate(() => window._cfState)).toBe('preloaded');
+    const cued = () => page.evaluate(() => ({ state: window._cfState, index: window._cfPreloadedIndex, video: window.__ytPlayers[1].videoId }));
+    expect(await cued(page)).toEqual({ state: 'preloaded', index: 2, video: 'v0000000003' });
+    await openPanel(page);
+
+    // One move that keeps the pair together (Track 5 to the top): the cue
+    // stays, its index follows.
+    const dropOnto = async (from, to, lower) => {
+        const tb = await row(page, to).boundingBox();
+        await row(page, from).locator('.queue-drag-handle').dragTo(row(page, to), { targetPosition: { x: tb.width / 2, y: lower ? tb.height - 4 : 4 } });
+    };
+    await dropOnto(4, 0, false);
+    await expect.poll(() => titles(page).then((t) => t[0])).toBe('Track 5');
+    expect(await cued(page)).toEqual({ state: 'preloaded', index: 3, video: 'v0000000003' });
+    expect(await currentRow(page)).toBe(2);
+
+    // Dropping a track in right after the current one: re-cued.
+    await dropOnto(5, 3, false);
+    await expect.poll(() => titles(page)).toEqual(['Track 5', 'Track 1', 'Track 2', 'Track 6', 'Track 3', 'Track 4']);
+    await expect.poll(() => cued(page)).toEqual({ state: 'preloaded', index: 3, video: 'v0000000006' });
+
+    // Into the fade: player 1 is 20 s from the end of a 30 s fade window.
+    await page.evaluate(() => { window.__ytPlayers[0].time = 280; });
+    await expect.poll(() => page.evaluate(() => window._cfState), { timeout: 5_000 }).toBe('fading');
+
+    // Something between the two fading tracks: refused, nothing changes.
+    const before = await titles(page);
+    await row(page, 4).locator('.queue-play-btn').focus();
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect(page.locator('.toast')).toContainText('Crossfading');
+    expect(await titles(page)).toEqual(before);
+    expect(await cued(page)).toEqual({ state: 'fading', index: 3, video: 'v0000000006' });
+
+    // A move that keeps the pair together is fine; the fade carries on.
+    await dropOnto(0, 5, true);
+    await expect.poll(() => titles(page)).toEqual(['Track 1', 'Track 2', 'Track 6', 'Track 3', 'Track 4', 'Track 5']);
+    expect(await cued(page)).toEqual({ state: 'fading', index: 2, video: 'v0000000006' });
+    expect(await currentRow(page)).toBe(1);
+});

@@ -41,7 +41,7 @@ function makeDocument() {
 
 function load({ stores = {}, queue = [], index = -1 } = {}) {
     const document = makeDocument();
-    const calls = { loaded: [], saved: 0, toasts: [], queueRenders: 0 };
+    const calls = { loaded: [], saved: 0, toasts: [], queueRefreshes: [] };
     const ctx = {
         Math, Date, JSON, console, Promise, document,
         dbGetAll: async name => (stores[name] || []).map(r => ({ ...r })),
@@ -49,7 +49,7 @@ function load({ stores = {}, queue = [], index = -1 } = {}) {
         currentIndex: index,
         loadFromQueue(i) { calls.loaded.push(i); },
         _savePlayerState() { calls.saved++; },
-        _renderQueuePanel() { calls.queueRenders++; },
+        refreshQueuePanel(opts) { calls.queueRefreshes.push(opts); },
         showToast(msg) { calls.toasts.push(msg); },
     };
     vm.createContext(ctx);
@@ -341,6 +341,7 @@ test('"Queue" appends the suggestion with its release and saves the queue', asyn
     assert.equal(queue[1].releaseId, 2);
     assert.equal(app.calls.saved, 1);
     assert.deepEqual(app.calls.toasts, ['Queued: Same key, same tempo']);
+    assert.deepEqual(JSON.parse(JSON.stringify(app.calls.queueRefreshes)), [{ reveal: false }], 'an open queue panel redraws, the list stays put (L10)');
     app.ctx.addSuggestionToQueue(99);
     assert.equal(queue.length, 2, 'an unknown index is ignored');
 });

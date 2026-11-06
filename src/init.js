@@ -44,10 +44,10 @@ document.addEventListener('DOMContentLoaded', function () {
         if (isPlaying) player.pauseVideo(); else player.playVideo();
     });
     document.getElementById('np-next').addEventListener('click', function () {
-        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' }); }
+        if (currentIndex < currentQueue.length - 1) { currentIndex++; loadFromQueue(currentIndex); }
     });
     document.getElementById('np-prev').addEventListener('click', function () {
-        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); if (document.getElementById('queue-panel')) _renderQueuePanel({ reveal: 'ifHidden' }); }
+        if (currentIndex > 0) { currentIndex--; loadFromQueue(currentIndex); }
     });
     document.getElementById('np-suggest').addEventListener('click', openSuggestions);
     document.getElementById('np-queue').addEventListener('click', openQueue);

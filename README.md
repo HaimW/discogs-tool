@@ -279,6 +279,7 @@ An embedded YouTube player drives all playback. A **Now Playing bar** stays fixe
 - Shows the current queue in order
 - Remove any track from the queue
 - Click a track to jump to it
+- Reorder it: drag a track by its handle (⋮⋮ at the row's start), or use its ▲/▼ buttons, or Alt+↑/↓ while one of the row's buttons has focus. The playing track keeps playing and the new order is kept on reload. On touch screens use the ▲/▼ buttons. While a crossfade is running, a move that would change the track fading in is refused until the fade ends.
 - Each row shows the track's BPM (rounded) and its key as a coloured Camelot chip, when its metadata has them (from the analyzer or entered by hand); a dimmed number or dashed chip is an analyzer estimate. Tracks without metadata show nothing there.
 - The list stays where you scrolled it when you play or remove a track, and a dragged panel stays where you dropped it. It scrolls by itself only when it opens, or when playback moves on (track ended, Next/Prev, an unplayable video skipped) to a track that is out of view.
 
@@ -379,6 +380,8 @@ Build and manage DJ setlists (playlists) from your collection.
 
 **Setlist detail page:**
 
+Tracks are listed in aligned columns — #, title, **BPM**, **Key** (Camelot chip), **Energy** and **Rating** — under a header row, so you can read tempos and keys straight down the running order. Values come from your track metadata (analyzer or hand-entered), also for tracks added before they had any; a dash means none yet, and estimated values are marked (dashed, "~"). On a phone the cover, energy and rating columns are hidden; BPM and key always show.
+
 | Action | How |
 |---|---|
 | Rename | Click the name field and type |
@@ -386,7 +389,7 @@ Build and manage DJ setlists (playlists) from your collection.
 | Remove a track | Click the × button |
 | Add notes | Type in the Notes textarea (venue, vibes, cues, etc.) |
 | Play all | Click **Play All** |
-| Play from a track | Click that track row |
+| Play from a track | Click the ▶ button on that row |
 
 **Export options:**
 
@@ -394,7 +397,7 @@ Build and manage DJ setlists (playlists) from your collection.
 |---|---|
 | M3U | Import into media players |
 | TXT | Plain text track listing |
-| CSV | Spreadsheet with BPM, Key, and metadata |
+| CSV | Spreadsheet: order, artist, title, release and YouTube ids, BPM, key (Camelot code), energy, rating |
 
 ---
 
@@ -605,6 +608,7 @@ discogs-tool/
     ├── meta_editor.js  — Inline metadata editor UI
     ├── queue.js        — Queue management
     ├── queue_meta.js   — BPM / key for the queue rows
+    ├── queue_order.js  — Index bookkeeping for reordering the queue
     ├── utils.js        — Shared helpers (escaping, dates, pagination)
     ├── actions.js      — Delegated event actions: act() instead of inline handlers
     ├── toast.js        — Non-blocking messages: showToast()

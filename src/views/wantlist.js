@@ -418,8 +418,7 @@ function wlShufflePlay(limitOverride) {
                 };
             });
             currentIndex = 0;
-            loadFromQueue(0);
-            _renderQueuePanel({ reveal: 'open' });
+            loadFromQueue(0, { reveal: 'open', open: true });
         });
     });
 }

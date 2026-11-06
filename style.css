@@ -737,7 +737,7 @@ a:hover { color: var(--accent-hover); }
     flex-shrink: 0; width: 22px; text-align: right;
     font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
 }
-.queue-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.queue-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 /* BPM over the key chip (F16), beside the row number. The column only shows
    once some row in the queue has data; then every row reserves the same width
    so the thumbnails stay aligned, and its height stays under the thumbnail's,
@@ -759,6 +759,35 @@ a:hover { color: var(--accent-hover); }
     font-size: 9px; line-height: 11px; padding: 0 3px; gap: 0;
 }
 .queue-play-btn, .queue-remove-btn { padding: 4px 8px !important; font-size: 11px !important; }
+/* Reorder (F17): a drag handle at the row's start, and up / down buttons
+   stacked in one narrow column beside play. */
+.queue-drag-handle {
+    flex-shrink: 0; width: 12px; margin-right: -4px; text-align: center;
+    color: var(--text-dim); cursor: grab; font-size: 12px; line-height: 1;
+    letter-spacing: -3px; opacity: 0.35; transition: opacity 0.15s;
+    user-select: none;
+}
+.queue-row:hover .queue-drag-handle { opacity: 0.9; }
+.queue-drag-handle:active { cursor: grabbing; }
+.queue-move { display: flex; flex-direction: column; gap: 2px; }
+.queue-move .btn {
+    padding: 0 6px; height: 17px; font-size: 8px; line-height: 1;
+    justify-content: center;
+}
+.queue-move .btn[aria-disabled="true"] { opacity: 0.3; cursor: default; }
+.queue-move .btn[aria-disabled="true"]:hover {
+    background: var(--bg-card); border-color: var(--border); color: var(--text);
+}
+.queue-row.dragging { opacity: 0.4; background: var(--bg-surface); }
+.queue-row.drag-over-above { box-shadow: inset 0 2px 0 var(--accent); }
+.queue-row.drag-over-below { box-shadow: inset 0 -2px 0 var(--accent); }
+/* Touch screens: HTML5 drag and drop does not work there, so no handle; the
+   move buttons get finger-sized targets instead (each 32 x 24, the pair as
+   tall as the row). */
+@media (pointer: coarse) {
+    .queue-drag-handle { display: none; }
+    .queue-move .btn { width: 32px; height: 24px; font-size: 10px; }
+}
 
 @media (max-width: 768px) {
     .queue-panel { right: 8px; left: 8px; width: auto; bottom: calc(var(--player-height, 100px) + 16px); }
@@ -885,10 +914,60 @@ a:hover { color: var(--accent-hover); }
 }
 .setlist-notes:focus { border-color: var(--accent); }
 
-.setlist-num {
-    flex-shrink: 0; width: 28px; text-align: right;
-    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+/* The track table (F18). The header and every row share one column template,
+   so BPM, key, energy and rating sit in straight columns and an empty value
+   keeps its cell. The title column takes what is left and ellipsizes. Narrow
+   screens drop the less important columns (see the media queries below), but
+   BPM and key always stay. */
+.setlist-tracklist {
+    --sl-cols: 16px 24px 36px 48px minmax(0, 1fr) 64px 176px 64px 72px 32px;
+    --sl-gap: 12px;
+    display: flex; flex-direction: column;
+    /* A solid panel: the page background is a busy photo, and the columns
+       read far better on a plain surface. */
+    background: rgba(17, 17, 17, 0.88); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 0 4px;
 }
+.setlist-tracklist .setlist-row + .setlist-row { border-top: 1px solid rgba(255, 255, 255, 0.04); }
+.setlist-head,
+.setlist-tracklist .setlist-row {
+    display: grid; grid-template-columns: var(--sl-cols);
+    column-gap: var(--sl-gap); align-items: center;
+    padding: 8px 12px;
+}
+.setlist-head {
+    padding-top: 0; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.5px;
+    text-transform: uppercase; color: var(--text-dim);
+}
+.sl-cell { display: flex; align-items: center; min-width: 0; }
+.sl-c-handle, .sl-c-play, .sl-c-remove { justify-content: center; }
+.sl-c-num, .sl-c-bpm { justify-content: flex-end; }
+.setlist-head .sl-c-energy, .setlist-head .sl-c-rating { justify-content: flex-start; }
+.setlist-tracklist .track-info {
+    flex-direction: column; align-items: stretch; gap: 2px;
+}
+.setlist-tracklist .track-thumb { width: 48px; height: 48px; }
+.setlist-num {
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+}
+/* Every BPM box is the column's full width with the figure right-aligned, so
+   the digits line up; the "~" slot is there on every row, so an estimate's
+   figure ends where a confirmed one's does. */
+.sl-c-bpm .badge-bpm {
+    width: 100%; text-align: right; font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+.sl-c-bpm .badge-est { display: inline-block; width: 0.7em; text-align: left; }
+.sl-c-key .camelot-chip { font-size: 11px; }
+.sl-none { color: var(--text-dim); opacity: 0.5; font-family: var(--font-mono); font-size: 12px; }
+/* A missing tempo's dash sits mid-column, so it does not run into the key's. */
+.sl-c-bpm .sl-none { margin: 0 auto; }
+/* The playing row is marked with an inset bar, not the list's left border,
+   which would push its cells 3px out of line. */
+.setlist-tracklist .video-item.playing { border-left: none; box-shadow: inset 3px 0 0 var(--accent); }
 
 .drag-handle {
     flex-shrink: 0; width: 16px; text-align: center;
@@ -903,11 +982,42 @@ a:hover { color: var(--accent-hover); }
     opacity: 0.4;
     background: var(--bg-surface);
 }
-.setlist-row.drag-over-above {
-    border-top: 2px solid var(--accent);
+/* Drop markers are inset shadows, so showing one never moves a row. */
+.setlist-row.drag-over-above { box-shadow: inset 0 2px 0 var(--accent); }
+.setlist-row.drag-over-below { box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Narrow desktops and tablets: the key chip loses its musical name and
+   relative key (the 176px key column would otherwise squeeze the title below
+   ~160px under about 880px). */
+@media (max-width: 900px) {
+    .setlist-tracklist { --sl-cols: 16px 24px 36px 48px minmax(0, 1fr) 64px 56px 64px 72px 32px; }
+    .sl-c-key .camelot-musical, .sl-c-key .camelot-rel { display: none; }
 }
-.setlist-row.drag-over-below {
-    border-bottom: 2px solid var(--accent);
+/* Tablets: the cover shrinks and the gaps tighten. */
+@media (max-width: 768px) {
+    .setlist-tracklist { --sl-cols: 16px 24px 36px 40px minmax(0, 1fr) 60px 56px 60px 68px 32px; --sl-gap: 10px; }
+    .setlist-tracklist .track-thumb { width: 40px; height: 40px; }
+}
+/* Narrow tablets: rating and energy go first, keeping the title at ~160px+. */
+@media (max-width: 720px) {
+    .setlist-tracklist { --sl-cols: 16px 24px 36px 40px minmax(0, 1fr) 60px 56px 32px; }
+    .sl-c-energy, .sl-c-rating { display: none; }
+}
+/* Phones and small tablets: the cover and the drag handle go too (the whole
+   row is still draggable, and touch screens cannot drag anyway). Number, play,
+   title, BPM, key and remove stay. */
+@media (max-width: 600px) {
+    .setlist-tracklist { --sl-cols: 18px 30px minmax(0, 1fr) 50px 56px 28px; --sl-gap: 6px; }
+    .setlist-head, .setlist-tracklist .setlist-row { padding-left: 4px; padding-right: 4px; }
+    /* Little room for the title: it gets two lines before the ellipsis. */
+    .setlist-tracklist .track-title-line {
+        white-space: normal; display: -webkit-box;
+        -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+        font-size: 13px; line-height: 1.25;
+    }
+    .sl-c-handle, .sl-c-cover, .sl-c-energy, .sl-c-rating { display: none; }
+    .setlist-tracklist .play-btn { width: 30px; height: 30px; }
+    .setlist-tracklist .meta-btn { width: 28px; height: 28px; }
 }
 
 /* ============ POPOVERS ============ */

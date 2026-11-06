@@ -55,7 +55,7 @@ function load() {
     for (const f of ['src/player.js', 'src/volume.js', 'src/crossfade.js']) vm.runInContext(read(f), ctx, { filename: f });
     Object.assign(ctx, {
         startViz() {}, stopViz() {}, highlightActiveTrack() {}, _savePlayerState() {},
-        _renderQueuePanel() {}, _trackPlayerHeight() {},
+        refreshQueuePanel() {}, _trackPlayerHeight() {},
     });
     ctx.player = fakePlayer('p1');
     ctx.player2 = fakePlayer('p2');
