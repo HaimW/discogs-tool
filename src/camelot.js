@@ -186,8 +186,7 @@ function _wheelSegment(code, a1, a2, rInner, rOuter, cx, cy, selCode, onPickFn, 
         'A' + rInner + ',' + rInner + ' 0 0 0 ' + p4.x + ',' + p4.y + 'Z';
     var label = _polar(cx, cy, (rInner + rOuter) / 2, (a1 + a2) / 2);
     var isSel = code === selCode;
-    var args = "'" + code + "'" + (context != null ? ", '" + escJs(String(context)) + "'" : '');
-    var click = onPickFn ? ' onclick="' + onPickFn + '(' + args + ')"' : '';
+    var click = onPickFn ? act('click', onPickFn, context != null ? [code, String(context)] : [code]) : '';
     return '<g class="camelot-seg' + (isSel ? ' camelot-seg-selected' : '') + '"' + click +
         ' role="button" tabindex="0" aria-label="' + escHtml(code + ', ' + e.musical) + '">' +
         '<title>' + escHtml(code + ' — ' + e.musical) + '</title>' +

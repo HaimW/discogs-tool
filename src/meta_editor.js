@@ -134,7 +134,7 @@ function renderTrackMetaEditor(panel, metaId) {
         panel.innerHTML =
             '<div class="meta-grid">' +
             '<label class="meta-field"><span>BPM</span><input type="number" step="0.1" min="40" max="220" id="mf-bpm-' + id + '" value="' + (meta.bpm != null ? meta.bpm : '') + '"></label>' +
-            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '" onchange="metaEditorSyncWheel(\'' + escJs(id) + '\')">' + keyOptions + '</select></label>' +
+            '<label class="meta-field"><span>Key (Camelot)</span><select id="mf-key-' + id + '"' + act('change', 'metaEditorSyncWheel', [id]) + '>' + keyOptions + '</select></label>' +
             '<label class="meta-field"><span>Rating</span><select id="mf-rating-' + id + '">' + ratingOptions + '</select></label>' +
             '<label class="meta-field"><span>Energy 1-10</span><input type="number" min="1" max="10" id="mf-energy-' + id + '" value="' + (meta.energy != null ? meta.energy : '') + '"></label>' +
             '<label class="meta-field"><span>Shelf</span><input type="text" id="mf-shelf-' + id + '" value="' + escHtml(meta.shelf || '') + '" placeholder="e.g. A3"></label>' +
@@ -146,8 +146,8 @@ function renderTrackMetaEditor(panel, metaId) {
             provenance +
             '</div>' +
             '<div class="meta-actions">' +
-            '<button class="btn" onclick="toggleTrackMetaEditor(\'' + id + '\')">Cancel</button>' +
-            '<button class="btn btn-primary" onclick="saveTrackMetaFromForm(\'' + id + '\',' + releaseId + ',\'' + youtubeId + '\')">Save</button>' +
+            '<button class="btn"' + act('click', 'toggleTrackMetaEditor', [id]) + '>Cancel</button>' +
+            '<button class="btn btn-primary"' + act('click', 'saveTrackMetaFromForm', [id, releaseId, youtubeId]) + '>Save</button>' +
             '</div>';
     });
 }

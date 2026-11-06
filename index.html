@@ -10,20 +10,10 @@
 </head>
 <body>
     <div class="bg-layer" aria-hidden="true">
-        <video src="A_dark_atmospheric_digital_ar.mp4" autoplay loop muted playsinline id="bg-video"></video>
+        <!-- 3.3 MB: loaded by the script at the end of <body> once the page is
+             ready, and not at all when turned off (P6). -->
+        <video data-src="A_dark_atmospheric_digital_ar.mp4" loop muted playsinline preload="none" id="bg-video"></video>
     </div>
-    <script>
-        const bgVideo = document.getElementById('bg-video');
-        const bgLayer = bgVideo.closest('.bg-layer');
-        const bgToggleBtn = document.getElementById('bg-toggle-btn');
-        bgVideo.playbackRate = 0.5;
-        bgToggleBtn.classList.add('active');
-        bgToggleBtn.addEventListener('click', () => {
-            const isOff = bgLayer.classList.toggle('bg-off');
-            bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
-            bgToggleBtn.classList.toggle('active', !isOff);
-        });
-    </script>
     <nav class="top-nav">
         <a href="#" class="nav-brand" id="nav-brand" data-nav="collection">
             <span class="vinyl-icon">&#9898;</span>
@@ -128,6 +118,8 @@
 
     <!-- Source modules (load order matters: dependencies first) -->
     <script src="src/utils.js"></script>
+    <script src="src/actions.js"></script>
+    <script src="src/toast.js"></script>
     <script src="src/db.js"></script>
     <script src="src/meta.js"></script>
     <script src="src/camelot.js"></script>
@@ -158,22 +150,61 @@
     <script src="src/init.js"></script>
     <script src="src/footer_credit.js"></script>
     <script>
+        // Background video (P6). It costs 3.3 MB, so it loads only after the
+        // page has, and never for someone who turned it off (remembered), asks
+        // for reduced motion, or has data saving on. The toggle loads it then.
         (function () {
             const bgVideo = document.getElementById('bg-video');
             const bgLayer = document.querySelector('.bg-layer');
             const bgToggleBtn = document.getElementById('bg-toggle-btn');
+            const PREF = 'bg-video';
 
-            // Set playback rate now and again once metadata loads (belt + suspenders)
-            function applyRate(v) { try { v.playbackRate = 0.95; } catch(e) {} }
-            applyRate(bgVideo);
-            bgVideo.addEventListener('loadedmetadata', function() { applyRate(bgVideo); }, { once: true });
+            function wantsVideo() {
+                let pref = null;
+                try { pref = localStorage.getItem(PREF); } catch (e) {}
+                if (pref === 'on') return true;
+                if (pref === 'off') return false;
+                if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+                if (navigator.connection && navigator.connection.saveData) return false;
+                return true;
+            }
+            function applyRate() { try { bgVideo.playbackRate = 0.95; } catch (e) {} }
+            function start() {
+                if (!bgVideo.getAttribute('src')) {
+                    bgVideo.src = bgVideo.dataset.src;
+                    bgVideo.addEventListener('loadedmetadata', applyRate, { once: true });
+                }
+                applyRate();
+                const p = bgVideo.play();
+                if (p && p.catch) p.catch(function () {});
+            }
+            let isOnNow = wantsVideo();
+            function setOn(isOn) {
+                isOnNow = isOn;
+                bgLayer.classList.toggle('bg-off', !isOn);
+                document.body.style.background = isOn ? '' : '#0a0a0a';
+                bgToggleBtn.title = isOn ? 'Disable background video' : 'Enable background video';
+                bgToggleBtn.classList.toggle('active', isOn);
+                if (isOn) start(); else bgVideo.pause();
+            }
 
-            bgToggleBtn.classList.add('active');
+            // Hidden until loaded, so nothing flashes; the page's own dark
+            // background shows. The button already shows the intended state.
+            bgLayer.classList.add('bg-off');
+            bgToggleBtn.classList.toggle('active', isOnNow);
+            if (isOnNow) {
+                const later = window.requestIdleCallback || function (fn) { setTimeout(fn, 200); };
+                // Skipped if it was switched off while waiting.
+                const go = function () { later(function () { if (isOnNow) setOn(true); }, { timeout: 2000 }); };
+                if (document.readyState === 'complete') go(); else window.addEventListener('load', go, { once: true });
+            } else {
+                setOn(false);
+            }
+
             bgToggleBtn.addEventListener('click', function () {
-                const isOff = bgLayer.classList.toggle('bg-off');
-                document.body.style.background = isOff ? '#0a0a0a' : '';
-                bgToggleBtn.title = isOff ? 'Enable background video' : 'Disable background video';
-                bgToggleBtn.classList.toggle('active', !isOff);
+                const next = !isOnNow;
+                try { localStorage.setItem(PREF, next ? 'on' : 'off'); } catch (e) {}
+                setOn(next);
             });
         })();
     </script>

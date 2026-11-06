@@ -1,7 +1,28 @@
 // ============ Init ============
 
-document.addEventListener('DOMContentLoaded', function () {
+// The two app-wide timers (L1) each start once, and stop when the page is
+// unloaded for good. A page kept in the back/forward cache keeps them: the
+// browser freezes it, and it may come back.
+function startPlayerStateSaver() {
+    if (_saveInterval) return;
     _saveInterval = setInterval(function () { if (isPlaying) _savePlayerState(); }, 2000);
+}
+
+function stopPlayerStateSaver() {
+    clearInterval(_saveInterval);
+    _saveInterval = null;
+}
+
+window.addEventListener('pagehide', function (e) {
+    // Last save, so a reload resumes from here rather than up to 2 s back.
+    if (isPlaying) _savePlayerState();
+    if (e.persisted) return;
+    stopPlayerStateSaver();
+    stopMarketplacePoll();
+});
+
+document.addEventListener('DOMContentLoaded', function () {
+    startPlayerStateSaver();
 
     document.getElementById('np-close').addEventListener('click', hideNowPlaying);
 

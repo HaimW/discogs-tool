@@ -44,10 +44,13 @@ function startAvailabilityCheck() {
 async function syncWantList(config) {
     var page = 1;
     var allWants = {};
+    var fetched = 0;
+    var reported = null;
     while (true) {
         var path = '/users/' + config.username + '/wants?per_page=100&page=' + page;
         var data = await discogsGet(path, config);
         var items = data.wants || [];
+        fetched += items.length;
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
             var info = item.basic_information || {};
@@ -75,6 +78,7 @@ async function syncWantList(config) {
         }
         var pagination = data.pagination || {};
         var totalPages = pagination.pages || 1;
+        if (typeof pagination.items === 'number') reported = pagination.items;
         showSyncBanner('Want list: page ' + page + '/' + totalPages);
         if (page >= totalPages) break;
         page++;
@@ -85,11 +89,18 @@ async function syncWantList(config) {
         await dbPut('wants', allWants[ids[ri]]);
     }
 
+    // Remove wants Discogs no longer lists, with their marketplace data (M2),
+    // only when the listing was complete and plausible (M3).
     var existingWants = await dbGetAll('wants');
-    for (var ei = 0; ei < existingWants.length; ei++) {
-        if (!allWants[existingWants[ei].id]) {
-            await dbDelete('wants', existingWants[ei].id);
-        }
+    var goneWants = existingWants.filter(function (w) { return !allWants[w.id]; });
+    if (!syncPruneAllowed('want list items', fetched, reported, existingWants.length, goneWants.length,
+            'Their price history and availability alerts')) {
+        showSyncBanner('Kept ' + goneWants.length + ' want(s) Discogs did not list this time.');
+        return;
+    }
+    for (var ei = 0; ei < goneWants.length; ei++) {
+        await dbDelete('wants', goneWants[ei].id);
+        await removeWantData(goneWants[ei].id);
     }
 }
 

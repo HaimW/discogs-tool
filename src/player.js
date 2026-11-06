@@ -304,7 +304,7 @@ function shufflePlay(limitOverride) {
         }
 
         var ids = filtered.map(function (r) { return r.id; });
-        if (ids.length === 0) { alert('No releases match the current filters.'); return; }
+        if (ids.length === 0) { showToast('No releases match the current filters.'); return; }
 
         // Fetch all videos for these releases, minus extra uploads of a track
         // already in the pool — or one record can fill a shuffle 8 times over.
@@ -314,7 +314,7 @@ function shufflePlay(limitOverride) {
             var matchingVideos = allVideos.filter(function (v) {
                 return v.youtube_id && ids.indexOf(v.release_id) !== -1 && !dupes[v.release_id + '_' + v.youtube_id];
             });
-            if (matchingVideos.length === 0) { alert('No videos found. Try syncing first.'); return; }
+            if (matchingVideos.length === 0) { showToast('No videos found. Try syncing first.'); return; }
 
             // Build release lookup
             var relMap = {};

@@ -23,15 +23,15 @@ function _restorePlayerState() {
         var item = currentQueue[currentIndex];
         if (!item) return;
         showNowPlaying(item.title, item.artist, item.cover);
-        if (state.isPlaying) {
-            player.loadVideoById({ videoId: item.youtubeId, startSeconds: state.currentTime || 0 });
-            isPlaying = true;
-        } else {
-            player.cueVideoById({ videoId: item.youtubeId, startSeconds: state.currentTime || 0 });
-            isPlaying = false;
-        }
+        // Always come back paused at the saved position (M4): a reload, a
+        // restored tab, or the reload another tab's DB upgrade forces should
+        // never start sound on its own. Play resumes from here.
+        player.cueVideoById({ videoId: item.youtubeId, startSeconds: state.currentTime || 0 });
+        isPlaying = false;
         updatePlayPauseBtn();
-        if (cfEnabled && state.isPlaying) setTimeout(_preloadNextTrack, 1200);
+        // Cueing the next track is silent, and keeps the crossfade ready for
+        // when play is pressed.
+        if (cfEnabled) setTimeout(_preloadNextTrack, 1200);
     } catch (e) { console.warn('Failed to restore player state:', e); }
 }
 

@@ -173,6 +173,33 @@ async function discogsGetPublic(path, _retries) {
     return r.json();
 }
 
+// Before a sync deletes local records that Discogs no longer listed (M3).
+// `fetched` and `reported` describe the listing: how many items the pages
+// held and how many Discogs said there were (pagination.items, or null when
+// it did not say). Returns true only when deleting `toRemove` of `stored`
+// records is safe: the listing was complete, it was not empty while we hold
+// records, and a large cut was confirmed by the person.
+var PRUNE_CONFIRM_MIN = 10;      // removals at or below this never ask
+var PRUNE_CONFIRM_SHARE = 0.25;  // ...nor do removals below this share of what is stored
+
+function syncPruneAllowed(what, fetched, reported, stored, toRemove, losing) {
+    if (toRemove === 0) return true;
+    if (typeof reported === 'number' && fetched < reported) {
+        console.warn('Sync of ' + what + ' listed ' + fetched + ' of ' + reported + ' items; skipping removals.');
+        return false;
+    }
+    if (fetched === 0 && stored > 0) {
+        console.warn('Sync of ' + what + ' came back empty with ' + stored + ' stored; skipping removals.');
+        return false;
+    }
+    if (toRemove > PRUNE_CONFIRM_MIN && toRemove >= stored * PRUNE_CONFIRM_SHARE) {
+        return confirm('Discogs no longer lists ' + toRemove + ' of your ' + stored + ' ' + what + '.\n\n' +
+            'Remove them here too? ' + (losing || 'Their local data') + ' is deleted with them.\n\n' +
+            'Choose Cancel to keep everything and check your Discogs account first.');
+    }
+    return true;
+}
+
 async function syncCollection(config) {
     // Phase 0: Fetch folders
     showSyncBanner('Fetching folders...');
@@ -195,7 +222,7 @@ async function syncCollection(config) {
     // skipDuplicates=true prevents the quantity++ branch from firing for
     // releases already captured from a custom folder — folder 0 returns
     // the entire collection, so without this every quantity would inflate by 1.
-    await fetchFolderReleases(config, 0, allReleases, null, true);
+    var allListing = await fetchFolderReleases(config, 0, allReleases, null, true);
 
     // Save releases to IndexedDB — preserve synced_at and video_count
     // from existing records so a re-sync doesn't wipe previous video data.
@@ -214,25 +241,22 @@ async function syncCollection(config) {
         await dbPut('releases', newRel);
     }
 
-    // Remove releases that are no longer in the Discogs collection.
+    // Remove releases that are no longer in the Discogs collection — only
+    // when the listing was complete and plausible (M3).
     var existingReleases = await dbGetAll('releases');
-    for (var ei = 0; ei < existingReleases.length; ei++) {
-        var eid = existingReleases[ei].id;
-        if (!allReleases[eid]) {
-            await dbDelete('releases', eid);
-            var staleVideos = await dbGetByIndex('videos', 'release_id', eid);
-            for (var vi2 = 0; vi2 < staleVideos.length; vi2++) {
-                await dbDelete('videos', staleVideos[vi2].id);
-            }
-            var staleTracks = await dbGetByIndex('tracklist', 'release_id', eid);
-            for (var ti2 = 0; ti2 < staleTracks.length; ti2++) {
-                await dbDelete('tracklist', staleTracks[ti2].id);
-            }
-            var staleMeta = await dbGetByIndex('track_meta', 'release_id', eid);
-            for (var mi = 0; mi < staleMeta.length; mi++) {
-                await dbDelete('track_meta', staleMeta[mi].id);
-            }
-        }
+    var goneReleases = existingReleases.filter(function (r) { return !allReleases[r.id]; });
+    if (!syncPruneAllowed('releases', allListing.fetched, allListing.reported,
+            existingReleases.length, goneReleases.length,
+            'Their videos, tracklists and your BPM/key, ratings and notes')) {
+        showSyncBanner('Kept ' + goneReleases.length + ' release(s) Discogs did not list this time.');
+        return;
+    }
+    for (var ei = 0; ei < goneReleases.length; ei++) {
+        var eid = goneReleases[ei].id;
+        await dbDelete('releases', eid);
+        await dbDeleteByIndex('videos', 'release_id', eid);
+        await dbDeleteByIndex('tracklist', 'release_id', eid);
+        await dbDeleteByIndex('track_meta', 'release_id', eid);
     }
 }
 
@@ -329,12 +353,17 @@ function formatEta(seconds) {
     return m + 'm ' + s + 's';
 }
 
+// Resolves to { fetched, reported }: items the pages held, and the total
+// Discogs reported (null when its pagination did not say).
 async function fetchFolderReleases(config, folderId, allReleases, tagFolderId, skipDuplicates) {
     var page = 1;
+    var fetched = 0;
+    var reported = null;
     while (true) {
         var path = '/users/' + config.username + '/collection/folders/' + folderId + '/releases?per_page=100&page=' + page;
         var data = await discogsGet(path, config);
         var items = data.releases || [];
+        fetched += items.length;
 
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
@@ -368,11 +397,13 @@ async function fetchFolderReleases(config, folderId, allReleases, tagFolderId, s
 
         var pagination = data.pagination || {};
         var totalPages = pagination.pages || 1;
+        if (typeof pagination.items === 'number') reported = pagination.items;
         showSyncBanner('  page ' + page + '/' + totalPages);
 
         if (page >= totalPages) break;
         page++;
     }
+    return { fetched: fetched, reported: reported };
 }
 
 function extractYoutubeId(uri) {

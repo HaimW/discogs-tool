@@ -46,7 +46,7 @@ function vmWords(s) {
 
 function vmBracketed(s) {
     var out = [];
-    String(s == null ? '' : s).replace(/[(\[]([^)\]]*)[)\]]/g, function (_, inner) {
+    String(s == null ? '' : s).replace(/[([]([^)\]]*)[)\]]/g, function (_, inner) {
         out.push(inner);
         return '';
     });
@@ -54,7 +54,7 @@ function vmBracketed(s) {
 }
 
 function vmUnbracketed(s) {
-    return String(s == null ? '' : s).replace(/[(\[][^)\]]*[)\]]/g, ' ');
+    return String(s == null ? '' : s).replace(/[([][^)\]]*[)\]]/g, ' ');
 }
 
 // The words naming the version: any word in brackets (minus years, catalogue

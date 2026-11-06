@@ -110,7 +110,7 @@ function analyzerLocalHtml() {
         '<p>Start it like this and the controls will appear here:</p>' +
         '<pre class="analyzer-cmd">discogs-analyzer --ui --allow-origin ' + escHtml(window.location.origin) + '</pre>' +
         '<div class="analyzer-actions">' +
-        '<button class="btn btn-primary" onclick="analyzerProbe()">Check again</button>' +
+        '<button class="btn btn-primary"' + act('click', 'analyzerProbe') + '>Check again</button>' +
         '<a class="btn" href="' + ANALYZER_RELEASES + '" target="_blank" rel="noopener noreferrer">Download the analyzer</a>' +
         '</div>' +
         '<p class="hint">The analyzer\u2019s own page at <a href="' + ANALYZER_URL + '" ' +
@@ -144,9 +144,9 @@ function analyzerConnected(state) {
             '<span>Re-analyse tracks I set or verified myself</span></label>' +
             '</div>' +
             '<div class="analyzer-actions">' +
-            '<button class="btn" id="an-plan" onclick="analyzerPlan()">Dry run</button>' +
-            '<button class="btn btn-primary" id="an-run" onclick="analyzerRun()">Start</button>' +
-            '<button class="btn btn-danger" id="an-stop" onclick="analyzerStop()" style="display:none">Stop</button>' +
+            '<button class="btn" id="an-plan"' + act('click', 'analyzerPlan') + '>Dry run</button>' +
+            '<button class="btn btn-primary" id="an-run"' + act('click', 'analyzerRun') + '>Start</button>' +
+            '<button class="btn btn-danger" id="an-stop"' + act('click', 'analyzerStop') + ' style="display:none">Stop</button>' +
             '<span class="analyzer-planline" id="an-planline"></span>' +
             '</div>' +
             '<div class="analyzer-bar"><div id="an-bar"></div></div>' +

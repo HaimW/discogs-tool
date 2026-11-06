@@ -46,7 +46,7 @@ function countryToCode(name) {
 
 function getSerialPrefix(countryStr) {
     if (!countryStr || !countryStr.trim()) return 'XX';
-    var parts = countryStr.split(/[\/,]/).map(function (p) { return p.trim(); }).filter(Boolean);
+    var parts = countryStr.split(/[/,]/).map(function (p) { return p.trim(); }).filter(Boolean);
     if (!parts.length) return 'XX';
     var codes = parts.map(countryToCode);
     codes = codes.filter(function (c, i, arr) { return arr.indexOf(c) === i; });

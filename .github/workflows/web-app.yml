@@ -1,0 +1,25 @@
+name: Web app checks
+
+# Lint and test the web app on every push and pull request. The desktop
+# analyzer has its own workflow (analyzer-release.yml) and is not built here.
+on:
+  push:
+    paths-ignore: ['desktop-analyzer/**', 'docs/**', '**/*.md']
+  pull_request:
+    paths-ignore: ['desktop-analyzer/**', 'docs/**', '**/*.md']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test

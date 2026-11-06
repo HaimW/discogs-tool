@@ -52,7 +52,11 @@ function closeQueue() {
 
 function _renderQueuePanel() {
     var existing = document.getElementById('queue-panel');
-    if (existing) existing.remove();
+    if (existing) {
+        // Its drag listeners live on document: remove them with it (L2).
+        if (existing._cleanup) existing._cleanup();
+        existing.remove();
+    }
 
     var panel = document.createElement('div');
     panel.id = 'queue-panel';
@@ -61,8 +65,8 @@ function _renderQueuePanel() {
     var html = '<div class="queue-header">' +
         '<span class="queue-title">&#9776; Queue &mdash; ' + currentQueue.length + ' track' + (currentQueue.length === 1 ? '' : 's') + '</span>' +
         '<div class="queue-header-actions">' +
-        '<button class="btn" onclick="saveQueueAsSetlist()">Save as setlist</button>' +
-        '<button class="meta-btn" onclick="closeQueue()" title="Close">&times;</button>' +
+        '<button class="btn"' + act('click', 'saveQueueAsSetlist') + '>Save as setlist</button>' +
+        '<button class="meta-btn"' + act('click', 'closeQueue') + ' title="Close">&times;</button>' +
         '</div></div>';
 
     html += '<div class="queue-list">';
@@ -80,8 +84,8 @@ function _renderQueuePanel() {
             '<div class="track-sub-line">' + escHtml(item.artist) + '</div>' +
             '</div>';
         html += '<div class="queue-actions">' +
-            '<button class="btn queue-play-btn" onclick="playFromQueuePanel(' + i + ')" title="Play from here">&#9654;</button>' +
-            '<button class="btn queue-remove-btn" onclick="removeFromQueuePanel(' + i + ')" title="Remove">&times;</button>' +
+            '<button class="btn queue-play-btn"' + act('click', 'playFromQueuePanel', [i]) + ' title="Play from here">&#9654;</button>' +
+            '<button class="btn queue-remove-btn"' + act('click', 'removeFromQueuePanel', [i]) + ' title="Remove">&times;</button>' +
             '</div>';
         html += '</div>';
     });
@@ -152,8 +156,7 @@ function saveQueueAsSetlist() {
         });
     }).then(function () {
         closeQueue();
-        showSyncBanner('Saved \u201c' + name.trim() + '\u201d \u2014 ' + tracks.length + ' track' + (tracks.length === 1 ? '' : 's'));
-        setTimeout(hideSyncBanner, 2000);
+        showToast('Saved \u201c' + name.trim() + '\u201d \u2014 ' + tracks.length + ' track' + (tracks.length === 1 ? '' : 's'), 'success');
     });
 }
 

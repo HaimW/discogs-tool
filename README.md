@@ -59,7 +59,26 @@ python3 -m http.server 5000
 
 Then open [http://localhost:5000](http://localhost:5000).
 
-No build step or dependencies required.
+No build step or dependencies required to run the app.
+
+### Checks (for development)
+
+Linting and tests need Node 20 or newer:
+
+```bash
+npm install      # ESLint, once
+npm run lint     # ESLint over app.js, src/ and tests/
+npm test         # unit tests (node --test tests/*.test.js)
+npm run check    # both; GitHub Actions runs the same on every push
+```
+
+Markup is built as strings, so clicks and other events are wired with
+`act()` from `src/actions.js` rather than inline `onclick="…"` handlers:
+`'<button' + act('click', 'wlRemove', [w.id, w.title]) + '>'`. Values travel
+as escaped JSON data and are never run as code. A test fails if an inline
+handler comes back or an action names a function that does not exist.
+User-facing messages use `showToast(message, 'info' | 'success' | 'error')`
+from `src/toast.js`, not `alert()`.
 
 ---
 
@@ -460,7 +479,9 @@ discogs-tool/
     ├── meta.js         — Track metadata read/write
     ├── meta_editor.js  — Inline metadata editor UI
     ├── queue.js        — Queue management
-    ├── utils.js        — Shared helpers
+    ├── utils.js        — Shared helpers (escaping, dates, pagination)
+    ├── actions.js      — Delegated event actions: act() instead of inline handlers
+    ├── toast.js        — Non-blocking messages: showToast()
     ├── store_serial.js — Store serialisation logic
     └── views/
         ├── setup.js        — Credentials setup screen
@@ -478,13 +499,13 @@ discogs-tool/
 
 | Layer | Technology |
 |---|---|
-| Language | Vanilla JavaScript (ES modules) |
+| Language | Vanilla JavaScript (classic scripts sharing one global scope; see `index.html` for the load order) |
 | Storage | IndexedDB (via custom wrapper) |
 | Music data | [Discogs REST API](https://www.discogs.com/developers/) |
 | Video playback | YouTube IFrame API |
 | Hosting | GitHub Pages (static) |
 
-No frameworks, no bundler, no server.
+No frameworks, no bundler, no server. ESLint and Node's built-in test runner are the only development tools.
 
 ---
 

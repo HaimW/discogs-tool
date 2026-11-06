@@ -133,7 +133,7 @@ function renderSuggestionsPanel(ctx, cands) {
 
     var html = '<div class="suggestions-header">' +
         '<span class="suggestions-title">Next up &mdash; harmonic matches</span>' +
-        '<button class="meta-btn" onclick="closeSuggestions()" title="Close">&times;</button>' +
+        '<button class="meta-btn"' + act('click', 'closeSuggestions') + ' title="Close">&times;</button>' +
         '</div>';
     html += '<div class="suggestions-sub">Current: ' + metaBits.join(' &middot; ') + '</div>';
 
@@ -156,8 +156,8 @@ function renderSuggestionsPanel(ctx, cands) {
             html += '<span class="track-badge score-badge">' + Math.round(c.score) + '</span>';
             html += '</span>';
             html += '<div class="suggestion-actions">' +
-                '<button class="btn btn-primary" onclick="playNextSuggestion(' + i + ')">Play next</button>' +
-                '<button class="btn" onclick="addSuggestionToQueue(' + i + ')">Queue</button>' +
+                '<button class="btn btn-primary"' + act('click', 'playNextSuggestion', [i]) + '>Play next</button>' +
+                '<button class="btn"' + act('click', 'addSuggestionToQueue', [i]) + '>Queue</button>' +
                 '</div>';
             html += '</div>';
         });
@@ -192,7 +192,6 @@ function addSuggestionToQueue(idx) {
     currentQueue.push({ youtubeId: c.youtubeId, releaseId: c.releaseId || null, title: c.title, artist: c.artist, cover: c.cover });
     _savePlayerState();
     if (document.getElementById('queue-panel')) _renderQueuePanel();
-    showSyncBanner('Queued: ' + c.title);
-    setTimeout(hideSyncBanner, 1200);
+    showToast('Queued: ' + c.title);
 }
 

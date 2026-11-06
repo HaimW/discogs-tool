@@ -123,23 +123,23 @@ function renderWantList() {
         html += '</span>';
         html += '<div class="shuffle-controls">';
         html += '<input type="number" id="wl-shuffle-count" class="shuffle-count-input" value="50" min="1" max="9999" title="Number of tracks to shuffle">';
-        html += '<button class="btn btn-shuffle" onclick="wlShufflePlay()">🔀 Shuffle Wants</button>';
-        html += '<button class="btn btn-shuffle-all" onclick="wlShufflePlayAll()">∞ Shuffle All</button>';
+        html += '<button class="btn btn-shuffle"' + act('click', 'wlShufflePlay') + '>🔀 Shuffle Wants</button>';
+        html += '<button class="btn btn-shuffle-all"' + act('click', 'wlShufflePlayAll') + '>∞ Shuffle All</button>';
         html += '</div>';
         html += '</div>';
         html += '<div class="wl-header-actions">';
-        html += '<button class="btn btn-primary" id="wl-sync-btn" onclick="startWantListSync()"' + (_wantSyncRunning ? ' disabled' : '') + '>';
+        html += '<button class="btn btn-primary" id="wl-sync-btn"' + act('click', 'startWantListSync') + (_wantSyncRunning ? ' disabled' : '') + '>';
         html += '<span class="sync-icon">↻</span> Sync Want List</button>';
-        html += '<button class="btn" id="wl-avail-btn" onclick="startAvailabilityCheck()"' + (_marketplaceSyncRunning ? ' disabled' : '') + ' title="Check how many copies are listed on the marketplace">&#128722; Check Availability</button>';
-        html += '<button class="btn" onclick="exportWantListCSV()" title="Export as CSV">↓ CSV</button>';
+        html += '<button class="btn" id="wl-avail-btn"' + act('click', 'startAvailabilityCheck') + (_marketplaceSyncRunning ? ' disabled' : '') + ' title="Check how many copies are listed on the marketplace">&#128722; Check Availability</button>';
+        html += '<button class="btn"' + act('click', 'exportWantListCSV') + ' title="Export as CSV">↓ CSV</button>';
         html += '</div>';
         html += '</div>';
 
         // Search bar
         html += '<div class="search-bar" style="margin-bottom:16px;">';
-        html += '<input type="text" class="search-input" id="wl-search-input" placeholder="Search artist or title..." value="' + escHtml(wf.q) + '" onkeydown="if(event.key===\'Enter\')wlDoSearch()">';
-        html += '<button class="btn btn-search" onclick="wlDoSearch()">Search</button>';
-        if (wf.q) html += '<button class="btn btn-clear" onclick="wlClearSearch()">Clear</button>';
+        html += '<input type="text" class="search-input" id="wl-search-input" placeholder="Search artist or title..." value="' + escHtml(wf.q) + '"' + act('enter', 'wlDoSearch') + '>';
+        html += '<button class="btn btn-search"' + act('click', 'wlDoSearch') + '>Search</button>';
+        if (wf.q) html += '<button class="btn btn-clear"' + act('click', 'wlClearSearch') + '>Clear</button>';
         html += '</div>';
 
         // Stats bar
@@ -148,9 +148,9 @@ function renderWantList() {
         // Decade filter pills inside stats bar
         if (decadesSorted.length > 0) {
             html += '<div class="wl-stat-group"><span class="filter-label">Decade:</span>';
-            html += '<span class="decade-pill' + (!wf.decade ? ' active' : '') + '" onclick="wlSetFilter(\'decade\',\'\')">All</span>';
+            html += '<span class="decade-pill' + (!wf.decade ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['decade', '']) + '>All</span>';
             decadesSorted.forEach(function (d) {
-                html += '<span class="decade-pill' + (String(wf.decade) === String(d) ? ' active' : '') + '" onclick="wlSetFilter(\'decade\',' + d + ')">' +
+                html += '<span class="decade-pill' + (String(wf.decade) === String(d) ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['decade', d]) + '>' +
                     d + 's <span class="pill-count">' + decadeCounts[d] + '</span></span>';
             });
             html += '</div>';
@@ -160,7 +160,7 @@ function renderWantList() {
         if (topGenres.length > 0) {
             html += '<div class="wl-stat-group"><span class="filter-label">Top genres:</span>';
             topGenres.forEach(function (g) {
-                html += '<span class="wl-stat-chip' + (wf.genre === g ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' +
+                html += '<span class="wl-stat-chip' + (wf.genre === g ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['genre', g]) + '>' +
                     escHtml(g) + ' <span class="pill-count">' + genreCounts[g] + '</span></span>';
             });
             html += '</div>';
@@ -170,7 +170,7 @@ function renderWantList() {
         html += '<div class="wl-stat-group">';
         html += '<span class="wl-stat-chip wl-not-owned">' + notInCollection + ' not in collection</span>';
         if (allWants.length > 0) {
-            html += '<span class="wl-stat-chip wl-dd-btn" onclick="wlDigDeeper()">🔍 Dig Deeper</span>';
+            html += '<span class="wl-stat-chip wl-dd-btn"' + act('click', 'wlDigDeeper') + '>🔍 Dig Deeper</span>';
         }
         html += '</div>';
 
@@ -182,9 +182,9 @@ function renderWantList() {
         // Genre filter pills
         if (genres.length > 0) {
             html += '<div class="genre-pills"><span class="filter-label">Genre:</span>';
-            html += '<span class="genre-pill' + (!wf.genre ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'\')">All</span>';
+            html += '<span class="genre-pill' + (!wf.genre ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['genre', '']) + '>All</span>';
             genres.forEach(function (g) {
-                html += '<span class="genre-pill' + (wf.genre === g ? ' active' : '') + '" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' + escHtml(g) + '</span>';
+                html += '<span class="genre-pill' + (wf.genre === g ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['genre', g]) + '>' + escHtml(g) + '</span>';
             });
             html += '</div>';
         }
@@ -192,9 +192,9 @@ function renderWantList() {
         // Format filter pills
         if (formats.length > 0) {
             html += '<div class="genre-pills"><span class="filter-label">Format:</span>';
-            html += '<span class="genre-pill' + (!wf.format ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'\')">All</span>';
+            html += '<span class="genre-pill' + (!wf.format ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['format', '']) + '>All</span>';
             formats.forEach(function (f) {
-                html += '<span class="genre-pill' + (wf.format === f ? ' active' : '') + '" onclick="wlSetFilter(\'format\',\'' + escJs(f) + '\')">' + escHtml(f) + '</span>';
+                html += '<span class="genre-pill' + (wf.format === f ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['format', f]) + '>' + escHtml(f) + '</span>';
             });
             html += '</div>';
         }
@@ -202,9 +202,9 @@ function renderWantList() {
         // Country filter pills
         if (countries.length > 0) {
             html += '<div class="genre-pills"><span class="filter-label">Country:</span>';
-            html += '<span class="genre-pill' + (!wf.country ? ' active' : '') + '" onclick="wlSetFilter(\'country\',\'\')">All</span>';
+            html += '<span class="genre-pill' + (!wf.country ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['country', '']) + '>All</span>';
             countries.forEach(function (c) {
-                html += '<span class="genre-pill' + (wf.country === c ? ' active' : '') + '" onclick="wlSetFilter(\'country\',\'' + escJs(c) + '\')">' + escHtml(c) + '</span>';
+                html += '<span class="genre-pill' + (wf.country === c ? ' active' : '') + '"' + act('click', 'wlSetFilter', ['country', c]) + '>' + escHtml(c) + '</span>';
             });
             html += '</div>';
         }
@@ -212,7 +212,7 @@ function renderWantList() {
         // Sort bar
         html += '<div class="sort-bar"><span class="sort-label">Sort by:</span>';
         [['artist', 'Artist'], ['title', 'Title'], ['year', 'Year'], ['date_added', 'Date Added'], ['rating', 'Rating']].forEach(function (pair) {
-            html += '<span class="sort-option' + (sortKey === pair[0] ? ' active' : '') + '" onclick="wlSetSort(\'' + pair[0] + '\')">' + pair[1] + '</span>';
+            html += '<span class="sort-option' + (sortKey === pair[0] ? ' active' : '') + '"' + act('click', 'wlSetSort', [pair[0]]) + '>' + pair[1] + '</span>';
         });
         html += '</div>';
 
@@ -221,10 +221,10 @@ function renderWantList() {
             html += '<div class="empty-state"><div class="vinyl-icon-huge">&#9898;</div>' +
                 '<p class="empty-title">Your want list is empty</p>' +
                 '<p class="empty-subtitle">Sync your Discogs want list to see it here</p>' +
-                '<button class="btn btn-primary btn-large" onclick="startWantListSync()"><span class="sync-icon">&#8635;</span> Sync Want List</button></div>';
+                '<button class="btn btn-primary btn-large"' + act('click', 'startWantListSync') + '><span class="sync-icon">&#8635;</span> Sync Want List</button></div>';
         } else if (filtered.length === 0) {
             html += '<div class="empty-state"><p class="empty-title">No wants match.</p>' +
-                '<button class="btn btn-primary" onclick="wlClearFilters()">Clear filters</button></div>';
+                '<button class="btn btn-primary"' + act('click', 'wlClearFilters') + '>Clear filters</button></div>';
         } else {
             html += '<div class="release-grid wl-grid">';
             pageWants.forEach(function (w) {
@@ -269,12 +269,12 @@ function renderWantList() {
                 }
                 html += '<div class="wl-card-actions">';
                 if (vc > 0) {
-                    html += '<button class="btn btn-sm btn-primary" onclick="wlPlayRelease(' + w.id + ')" title="Play videos">&#9654;</button>';
+                    html += '<button class="btn btn-sm btn-primary"' + act('click', 'wlPlayRelease', [w.id]) + ' title="Play videos">&#9654;</button>';
                 }
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + w.id + '" target="_blank" rel="noopener" title="View on Discogs">&#8599;</a>';
                 html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + w.id + '" target="_blank" rel="noopener" title="Buy on Discogs marketplace">&#128722;</a>';
-                html += '<button class="btn btn-sm" onclick="wlOpenPricePanel(' + w.id + ', this)" title="Price suggestions">$</button>';
-                html += '<button class="btn btn-sm btn-danger" onclick="wlRemove(' + w.id + ',\'' + escJs(w.artist) + '\',\'' + escJs(w.title) + '\')" title="Remove from want list">&times;</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'wlOpenPricePanel', [w.id, ACT_THIS]) + ' title="Price suggestions">$</button>';
+                html += '<button class="btn btn-sm btn-danger"' + act('click', 'wlRemove', [w.id, w.artist, w.title]) + ' title="Remove from want list">&times;</button>';
                 html += '</div>';
                 html += '</div>';
 
@@ -284,21 +284,7 @@ function renderWantList() {
             html += '</div>';
 
             // Pagination
-            if (totalPages > 1) {
-                html += '<div class="pagination">';
-                if (page > 1) html += '<span class="page-link" onclick="wlGoPage(' + (page - 1) + ')">&laquo; Prev</span>';
-                for (var p = 1; p <= totalPages; p++) {
-                    if (p === page) {
-                        html += '<span class="page-link active">' + p + '</span>';
-                    } else if (p <= 3 || p > totalPages - 3 || (p >= page - 2 && p <= page + 2)) {
-                        html += '<span class="page-link" onclick="wlGoPage(' + p + ')">' + p + '</span>';
-                    } else if (p === 4 || p === totalPages - 3) {
-                        html += '<span class="page-dots">...</span>';
-                    }
-                }
-                if (page < totalPages) html += '<span class="page-link" onclick="wlGoPage(' + (page + 1) + ')">Next &raquo;</span>';
-                html += '</div>';
-            }
+            html += renderPagination(page, totalPages, 'wlGoPage');
         }
 
         document.getElementById('app').innerHTML = html;
@@ -329,7 +315,7 @@ function wlPlayRelease(releaseId) {
     // Same pick as the release page: one video per track when they match.
     releasePlayableVideos(releaseId).then(function (videos) {
         if (!videos || videos.length === 0) {
-            alert('No videos found for this release. Try syncing the want list first.');
+            showToast('No videos found for this release. Try syncing the want list first.');
             return;
         }
         return dbGet('wants', releaseId).then(function (w) {
@@ -370,14 +356,14 @@ function wlShufflePlay(limitOverride) {
         if (wf.country) filtered = filtered.filter(function (w) { return w.country === wf.country; });
 
         var ids = filtered.map(function (w) { return w.id; });
-        if (ids.length === 0) { alert('No wants match the current filters.'); return; }
+        if (ids.length === 0) { showToast('No wants match the current filters.'); return; }
 
         dbGetAll('videos').then(function (allVideos) {
             var matchingVideos = allVideos.filter(function (v) {
                 return v.youtube_id && ids.indexOf(v.release_id) !== -1;
             });
             if (matchingVideos.length === 0) {
-                alert('No videos found for your want list. Sync the want list first to fetch them.');
+                showToast('No videos found for your want list. Sync the want list first to fetch them.');
                 return;
             }
 
@@ -436,15 +422,16 @@ function wlRemove(releaseId, artist, title) {
         }).then(function (r) {
             if (r.ok || r.status === 204) {
                 return dbDelete('wants', releaseId).then(function () {
-                    showSyncBanner('Removed from want list');
-                    setTimeout(hideSyncBanner, 2000);
+                    return removeWantData(releaseId);
+                }).then(function () {
+                    showToast('Removed from want list', 'success');
                     renderWantList();
                 });
             } else {
-                alert('Failed to remove from Discogs (HTTP ' + r.status + ')');
+                showToast('Could not remove it on Discogs (HTTP ' + r.status + ').', 'error');
             }
         }).catch(function (err) {
-            alert('Error: ' + err.message);
+            showToast('Could not reach Discogs: ' + err.message, 'error');
         });
     });
 }

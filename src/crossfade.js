@@ -42,17 +42,30 @@ function _stopCfCheckInterval() {
     _cfCheckInterval = null;
 }
 
+// The fade a track gets (M1): the chosen length, but never more than a third
+// of the track, so a short track still crossfades instead of being skipped,
+// and still plays on its own for most of its length. 0 = no fade (a track
+// under 3 s, or no duration yet).
+var CF_MAX_TRACK_SHARE = 1 / 3;
+var CF_MIN_SECONDS = 1;
+
+function _effectiveFadeSeconds(duration, chosenSeconds) {
+    if (!(duration > 0) || !(chosenSeconds > 0)) return 0;
+    var fade = Math.min(chosenSeconds, duration * CF_MAX_TRACK_SHARE);
+    return fade >= CF_MIN_SECONDS ? fade : 0;
+}
+
 function _checkCrossfade() {
     if (!cfEnabled || _cfState !== 'preloaded') return;
     if (!playerReady || !player2Ready) return;
     try {
         var duration = player.getDuration();
         var currentTime = player.getCurrentTime();
-        if (duration <= 0) return;
-        if (duration < cfSeconds + 2) return;
+        var fade = _effectiveFadeSeconds(duration, cfSeconds);
+        if (!fade) return;
         var timeLeft = duration - currentTime;
-        if (timeLeft > 0 && timeLeft <= cfSeconds) {
-            _startCrossfade();
+        if (timeLeft > 0 && timeLeft <= fade) {
+            _startCrossfade(fade);
         }
     } catch (e) {}
 }
@@ -73,7 +86,9 @@ function _preloadNextTrack() {
     } catch (e) {}
 }
 
-function _startCrossfade() {
+// `fadeSeconds`: this track's fade from _effectiveFadeSeconds (the chosen
+// length when not given).
+function _startCrossfade(fadeSeconds) {
     _cfState = 'fading';
     var startVol = 100;
     try { startVol = player.getVolume(); } catch (e) {}
@@ -81,7 +96,7 @@ function _startCrossfade() {
         player2.setVolume(0);
         player2.playVideo();
     } catch (e) { _abortCrossfade(); return; }
-    var steps = Math.ceil(cfSeconds * 1000 / 50);
+    var steps = Math.max(1, Math.ceil((fadeSeconds || cfSeconds) * 1000 / 50));
     var tick = 0;
     _cfFadeInterval = setInterval(function () {
         tick++;

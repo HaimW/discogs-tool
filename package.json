@@ -1,0 +1,20 @@
+{
+  "name": "vinyl-collection-player",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Client-side Discogs collection player: IndexedDB storage, Discogs API, YouTube playback.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint .",
+    "check": "npm run lint && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0"
+  }
+}

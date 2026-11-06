@@ -37,7 +37,7 @@ function renderRelease(releaseId) {
 
         var backView = r._fromWantlist ? 'wantlist' : 'collection';
         var backLabel = r._fromWantlist ? '&larr; Back to want list' : '&larr; Back to collection';
-        var html = '<span class="back-link" onclick="navigate(\'' + backView + '\')">' + backLabel + '</span>';
+        var html = '<span class="back-link"' + act('click', 'navigate', [backView]) + '>' + backLabel + '</span>';
         html += '<div class="release-detail"><div class="release-hero">';
 
         // Cover
@@ -101,9 +101,9 @@ function renderRelease(releaseId) {
         if (videos.length > 0) {
             html += '<div class="video-header-actions">';
             if (canOverride && r.video_overrides && Object.keys(r.video_overrides).length) {
-                html += '<button class="btn btn-sm" onclick="resetVideoOverrides(' + r.id + ')" title="Forget your picks and match automatically">Reset picks</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'resetVideoOverrides', [r.id]) + ' title="Forget your picks and match automatically">Reset picks</button>';
             }
-            html += '<button class="btn btn-play-all" onclick="playAllFromRelease(' + r.id + ')">&#9654; Play All</button>';
+            html += '<button class="btn btn-play-all"' + act('click', 'playAllFromRelease', [r.id]) + '>&#9654; Play All</button>';
             html += '</div>';
         }
         html += '</div>';
@@ -131,7 +131,7 @@ function renderRelease(releaseId) {
 
             if (match.others.length) {
                 html += '<div class="vm-others">' +
-                    '<button class="vm-others-toggle" onclick="toggleVmGroup(this, \'vm-others-' + r.id + '\')" aria-expanded="false">' +
+                    '<button class="vm-others-toggle"' + act('click', 'toggleVmGroup', [ACT_THIS, 'vm-others-' + r.id]) + ' aria-expanded="false">' +
                     '<span class="vm-caret">&#9656;</span> Other videos (' + match.others.length + ')' +
                     '<span class="vm-others-hint">other mixes, DJ sets, clips &mdash; not on this pressing</span></button>' +
                     '<div class="video-list vm-others-list" id="vm-others-' + r.id + '" data-queue-scope style="display:none;">';
@@ -165,7 +165,7 @@ function videoRowHtml(vid, ctx, opts) {
     var metaId = r.id + '_' + vid.youtube_id;
     var meta = ctx.metaById[metaId] || null;
     var html = '<div class="video-item' + (opts.cls ? ' ' + opts.cls : '') + '" data-youtube-id="' + escHtml(vid.youtube_id) + '" data-title="' + escHtml(vid.title) + '" data-artist="' + escHtml(r.artist) + '" data-cover="' + escHtml(r.thumb_url || '') + '" data-release-id="' + r.id + '" data-meta-id="' + escHtml(metaId) + '">' +
-        '<button class="play-btn" onclick="playTrack(this.parentElement)"><span class="play-icon">&#9654;</span></button>' +
+        '<button class="play-btn"' + act('click', 'playTrack', [ACT_PARENT]) + '><span class="play-icon">&#9654;</span></button>' +
         '<div class="video-info">';
     if (opts.pos) html += '<span class="vm-pos">' + escHtml(opts.pos) + '</span>';
     html += '<span class="video-title">' + escHtml(vid.title) + '</span>';
@@ -191,18 +191,18 @@ function videoRowHtml(vid, ctx, opts) {
     }
     html += '</div>';
     if (opts.dupes) {
-        html += '<button class="meta-btn vm-dupes-btn" onclick="toggleVmGroup(this, \'vm-dupes-' + r.id + '-' + opts.trackIndex + '\')" aria-expanded="false" title="Other uploads of this track">+' + opts.dupes + '</button>';
+        html += '<button class="meta-btn vm-dupes-btn"' + act('click', 'toggleVmGroup', [ACT_THIS, 'vm-dupes-' + r.id + '-' + opts.trackIndex]) + ' aria-expanded="false" title="Other uploads of this track">+' + opts.dupes + '</button>';
     }
     if (ctx.tracks && opts.cls) {
-        html += '<select class="vm-assign" title="Use this video for a track" aria-label="Use this video for a track" onchange="setVideoOverride(' + r.id + ', this.value, \'' + escJs(vid.youtube_id) + '\')">' +
+        html += '<select class="vm-assign" title="Use this video for a track" aria-label="Use this video for a track"' + act('change', 'setVideoOverride', [r.id, ACT_VALUE, vid.youtube_id]) + '>' +
             '<option value="">Use for&hellip;</option>';
         ctx.tracks.forEach(function (t) {
             html += '<option value="' + t.index + '">' + escHtml((t.position ? t.position + ' — ' : '') + t.title) + '</option>';
         });
         html += '</select>';
     }
-    html += '<button class="meta-btn add-btn" onclick="openAddToSetlistPopover(this)" title="Add to setlist">+</button>' +
-        '<button class="meta-btn" onclick="toggleTrackMetaEditor(\'' + metaId + '\')" title="Edit metadata">&#9998;</button>' +
+    html += '<button class="meta-btn add-btn"' + act('click', 'openAddToSetlistPopover', [ACT_THIS]) + ' title="Add to setlist">+</button>' +
+        '<button class="meta-btn"' + act('click', 'toggleTrackMetaEditor', [metaId]) + ' title="Edit metadata">&#9998;</button>' +
         '</div>' +
         '<div class="track-meta-editor" id="editor-' + metaId + '" style="display:none;"></div>';
     return html;

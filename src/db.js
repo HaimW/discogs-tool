@@ -1,7 +1,7 @@
 // ============ IndexedDB Storage ============
 
 var DB_NAME = 'VinylCollectionPlayer';
-var DB_VERSION = 8;
+var DB_VERSION = 9;
 var _db = null;
 
 function openDB() {
@@ -68,6 +68,15 @@ function openDB() {
                 ns.createIndex('seen', 'seen');
                 ns.createIndex('created_at', 'created_at');
             }
+            // v9: one row per marketplace reading worth keeping (a change, or a
+            // daily heartbeat), keyed `<release_id>_<checked_at>` so rows from a
+            // backup merge with local ones instead of colliding on an
+            // auto-increment id.
+            if (!db.objectStoreNames.contains('price_history')) {
+                var ph = db.createObjectStore('price_history', { keyPath: 'id' });
+                ph.createIndex('release_id', 'release_id');
+                ph.createIndex('checked_at', 'checked_at');
+            }
         };
         req.onblocked = function () {
             console.warn('IndexedDB upgrade blocked by another open tab. Please close other tabs and reload.');
@@ -79,6 +88,8 @@ function openDB() {
             _db.onversionchange = function () {
                 _db.close();
                 _db = null;
+                // A blocking alert on purpose (not a toast): the reload below
+                // follows at once, and this is the only way to say why.
                 alert('The app database was updated in another tab. This tab will now reload.');
                 window.location.reload();
             };
@@ -150,6 +161,25 @@ function dbDelete(store, key) {
             var tx = db.transaction(store, 'readwrite');
             tx.objectStore(store).delete(key);
             tx.oncomplete = function () { resolve(); };
+            tx.onerror = function (e) { reject(e.target.error); };
+        });
+    });
+}
+
+// Delete every record whose `indexName` equals `value`, in one transaction.
+// Resolves to the number deleted.
+function dbDeleteByIndex(store, indexName, value) {
+    return openDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+            var tx = db.transaction(store, 'readwrite');
+            var req = tx.objectStore(store).index(indexName).getAllKeys(value);
+            var count = 0;
+            req.onsuccess = function () {
+                var keys = req.result || [];
+                count = keys.length;
+                keys.forEach(function (k) { tx.objectStore(store).delete(k); });
+            };
+            tx.oncomplete = function () { resolve(count); };
             tx.onerror = function (e) { reject(e.target.error); };
         });
     });

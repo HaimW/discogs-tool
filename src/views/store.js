@@ -80,18 +80,18 @@ function renderStore() {
             storeItems.filter(function (i) { return i.store_status === 'sold'; }).length + ' sold</span>';
         html += '</div>';
         html += '<div class="store-header-actions">';
-        html += '<button class="btn btn-primary" onclick="storeSerializePreview()">' + serializeBtnLabel + '</button>';
-        html += '<button class="btn" onclick="storePrintAll()">Print All</button>';
+        html += '<button class="btn btn-primary"' + act('click', 'storeSerializePreview') + '>' + serializeBtnLabel + '</button>';
+        html += '<button class="btn"' + act('click', 'storePrintAll') + '>Print All</button>';
         html += '</div>';
         html += '</div>';
 
         // Search bar
         html += '<div class="search-bar" style="margin-top:12px;">';
         html += '<input type="text" class="search-input" id="store-search-input" placeholder="Search serial, artist or title..." ' +
-            'value="' + escHtml(_storeFilters.q) + '" ' +
-            'oninput="storeSetFilter(\'q\',this.value)">';
+            'value="' + escHtml(_storeFilters.q) + '"' +
+            act('input', 'storeSetFilter', ['q', ACT_VALUE]) + '>';
         if (_storeFilters.q) {
-            html += '<button class="btn btn-clear" onclick="storeSetFilter(\'q\',\'\')">Clear</button>';
+            html += '<button class="btn btn-clear"' + act('click', 'storeSetFilter', ['q', '']) + '>Clear</button>';
         }
         html += '</div>';
         html += '</div>';
@@ -99,16 +99,16 @@ function renderStore() {
         // ---- Status filter pills ----
         html += '<div class="genre-pills" style="margin-top:16px;">';
         html += '<span class="filter-label">Status:</span>';
-        html += '<span class="genre-pill' + (!_storeFilters.status ? ' active' : '') + '" onclick="storeSetFilter(\'status\',\'\')">All</span>';
-        html += '<span class="genre-pill' + (_storeFilters.status === 'active' ? ' active' : '') + '" onclick="storeSetFilter(\'status\',\'active\')">Active</span>';
-        html += '<span class="genre-pill' + (_storeFilters.status === 'sold' ? ' active' : '') + '" onclick="storeSetFilter(\'status\',\'sold\')">Sold</span>';
+        html += '<span class="genre-pill' + (!_storeFilters.status ? ' active' : '') + '"' + act('click', 'storeSetFilter', ['status', '']) + '>All</span>';
+        html += '<span class="genre-pill' + (_storeFilters.status === 'active' ? ' active' : '') + '"' + act('click', 'storeSetFilter', ['status', 'active']) + '>Active</span>';
+        html += '<span class="genre-pill' + (_storeFilters.status === 'sold' ? ' active' : '') + '"' + act('click', 'storeSetFilter', ['status', 'sold']) + '>Sold</span>';
         html += '</div>';
 
         // ---- Batches section ----
         html += '<div class="store-batches-section">';
         html += '<div class="store-section-hd">';
         html += '<span class="store-section-title">Batches</span>';
-        html += '<button class="btn btn-sm" onclick="storeNewBatchPrompt()">+ New Batch</button>';
+        html += '<button class="btn btn-sm"' + act('click', 'storeNewBatchPrompt') + '>+ New Batch</button>';
         html += '</div>';
 
         if (batches.length === 0) {
@@ -116,17 +116,17 @@ function renderStore() {
         } else {
             html += '<div class="store-batch-list">';
             if (_storeFilters.batchId !== null) {
-                html += '<span class="batch-tag batch-tag-active" onclick="storeSetFilter(\'batchId\',null)">All Inventory ×</span>';
+                html += '<span class="batch-tag batch-tag-active"' + act('click', 'storeSetFilter', ['batchId', null]) + '>All Inventory ×</span>';
             } else {
-                html += '<span class="batch-tag" onclick="storeSetFilter(\'batchId\',null)">All Inventory</span>';
+                html += '<span class="batch-tag"' + act('click', 'storeSetFilter', ['batchId', null]) + '>All Inventory</span>';
             }
             batches.forEach(function (b) {
                 var count = storeItems.filter(function (i) { return i.batch_id === b.id; }).length;
                 var isActive = _storeFilters.batchId === b.id;
-                html += '<span class="batch-tag' + (isActive ? ' batch-tag-active' : '') + '" onclick="storeSetFilter(\'batchId\',' + b.id + ')">' +
+                html += '<span class="batch-tag' + (isActive ? ' batch-tag-active' : '') + '"' + act('click', 'storeSetFilter', ['batchId', b.id]) + '>' +
                     escHtml(b.name) + ' <span class="batch-count">' + count + '</span></span>';
-                html += '<button class="btn btn-sm" onclick="storePrintBatch(' + b.id + ',\'' + escJs(b.name) + '\')" title="Print batch">Print</button>';
-                html += '<button class="btn btn-sm btn-danger" onclick="storeDeleteBatchConfirm(' + b.id + ',\'' + escJs(b.name) + '\')" title="Delete batch">&times;</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'storePrintBatch', [b.id, b.name]) + ' title="Print batch">Print</button>';
+                html += '<button class="btn btn-sm btn-danger"' + act('click', 'storeDeleteBatchConfirm', [b.id, b.name]) + ' title="Delete batch">&times;</button>';
             });
             html += '</div>';
         }
@@ -140,11 +140,11 @@ function renderStore() {
                 '<div class="vinyl-icon-huge">&#9898;</div>' +
                 '<p class="empty-title">No records serialized yet</p>' +
                 '<p class="empty-subtitle">Click "Serialize Collection" to assign permanent serial numbers to your records.</p>' +
-                '<button class="btn btn-primary btn-large" onclick="storeSerializePreview()">Serialize Collection</button>' +
+                '<button class="btn btn-primary btn-large"' + act('click', 'storeSerializePreview') + '>Serialize Collection</button>' +
                 '</div>';
         } else if (filtered.length === 0) {
             html += '<div class="empty-state"><p class="empty-title">No records match your filters</p>' +
-                '<button class="btn btn-primary" onclick="storeClearFilters()">Clear Filters</button></div>';
+                '<button class="btn btn-primary"' + act('click', 'storeClearFilters') + '>Clear Filters</button></div>';
         } else {
             html += '<div class="store-table-wrap"><table class="store-table">';
             html += '<thead><tr>' +
@@ -170,7 +170,7 @@ function renderStore() {
                 // Serial cell with inline edit
                 html += '<td id="serial-cell-' + r.id + '" class="serial-cell">' +
                     '<span class="serial-number' + (r.manual_serial ? ' serial-manual' : '') + '">' + escHtml(r.serial) + '</span>' +
-                    '<button class="btn-icon" title="Edit serial" onclick="storeBeginEditSerial(' + r.id + ',\'' + escJs(r.serial) + '\')">✎</button>' +
+                    '<button class="btn-icon" title="Edit serial"' + act('click', 'storeBeginEditSerial', [r.id, r.serial]) + '>✎</button>' +
                     '</td>';
 
                 html += '<td class="td-artist">' + escHtml(r.artist) + '</td>';
@@ -187,18 +187,18 @@ function renderStore() {
                 if (batchName) {
                     html += '<span class="batch-tag-sm">' + escHtml(batchName) + '</span> ';
                 }
-                html += '<button class="btn-icon" title="Assign batch" onclick="storeAssignBatchModal(' + r.id + ',' + (r.batch_id || 'null') + ')">+</button>';
+                html += '<button class="btn-icon" title="Assign batch"' + act('click', 'storeAssignBatchModal', [r.id, r.batch_id || null]) + '>+</button>';
                 html += '</td>';
 
                 // Actions
                 html += '<td class="td-actions">';
                 html += '<a class="btn btn-sm" href="https://www.discogs.com/release/' + r.id + '" target="_blank" rel="noopener" title="Open on Discogs">↗</a>';
-                html += '<button class="btn btn-sm" onclick="storeRefreshPrice(' + r.id + ')" title="Refresh price">$ ↺</button>';
-                html += '<button class="btn btn-sm" onclick="storePriceGuide(' + r.id + ')" title="Price suggestions by condition">$ Guide</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'storeRefreshPrice', [r.id]) + ' title="Refresh price">$ ↺</button>';
+                html += '<button class="btn btn-sm"' + act('click', 'storePriceGuide', [r.id]) + ' title="Price suggestions by condition">$ Guide</button>';
                 if (r.store_status === 'active') {
-                    html += '<button class="btn btn-sm btn-sold" onclick="storeMarkSoldModal(' + r.id + ')" title="Mark as sold">Sold</button>';
+                    html += '<button class="btn btn-sm btn-sold"' + act('click', 'storeMarkSoldModal', [r.id]) + ' title="Mark as sold">Sold</button>';
                 }
-                html += '<button class="btn btn-sm btn-danger" onclick="storeRemoveConfirm(' + r.id + ',\'' + escJs(r.serial) + '\',\'' + escJs(r.artist) + '\',\'' + escJs(r.title) + '\')" title="Remove from store and collection">&times;</button>';
+                html += '<button class="btn btn-sm btn-danger"' + act('click', 'storeRemoveConfirm', [r.id, r.serial, r.artist, r.title]) + ' title="Remove from store and collection">&times;</button>';
                 html += '</td>';
 
                 html += '</tr>';
@@ -263,7 +263,7 @@ function storeSerializePreview() {
             _showModal(
                 '<h2 class="modal-title">Nothing to Serialize</h2>' +
                 '<p class="modal-body">All records in your collection already have serial numbers.</p>' +
-                '<div class="modal-actions"><button class="btn btn-primary" onclick="_closeModal()">OK</button></div>'
+                '<div class="modal-actions"><button class="btn btn-primary"' + act('click', '_closeModal') + '>OK</button></div>'
             );
             return;
         }
@@ -286,8 +286,8 @@ function storeSerializePreview() {
         html += '<p class="modal-body">Serial numbers will be assigned by country and sorted by release year. Once assigned they are permanent.</p>';
         html += '<table class="preview-table">' + previewRows + '</table>';
         html += '<div class="modal-actions">';
-        html += '<button class="btn" onclick="_closeModal()">Cancel</button>';
-        html += '<button class="btn btn-primary" onclick="storeRunSerialize()">Serialize</button>';
+        html += '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>';
+        html += '<button class="btn btn-primary"' + act('click', 'storeRunSerialize') + '>Serialize</button>';
         html += '</div>';
 
         _showModal(html);
@@ -323,13 +323,14 @@ function storeBeginEditSerial(releaseId, currentSerial) {
     cell.innerHTML =
         '<div class="serial-edit-wrap">' +
         '<input id="serial-input-' + releaseId + '" class="serial-edit-input" ' +
-        'value="' + escHtml(currentSerial) + '" ' +
-        'oninput="storeValidateSerial(' + releaseId + ')" ' +
-        'onkeydown="if(event.key===\'Enter\')storeSaveSerial(' + releaseId + ',\'' + escJs(currentSerial) + '\');if(event.key===\'Escape\')storeCancelEditSerial(' + releaseId + ',\'' + escJs(currentSerial) + '\')">' +
+        'value="' + escHtml(currentSerial) + '"' +
+        act('input', 'storeValidateSerial', [releaseId]) +
+        act('enter', 'storeSaveSerial', [releaseId, currentSerial]) +
+        act('escape', 'storeCancelEditSerial', [releaseId, currentSerial]) + '>' +
         '<span id="serial-error-' + releaseId + '" class="serial-error"></span>' +
         '<div class="serial-edit-btns">' +
-        '<button class="btn btn-sm btn-primary" id="serial-save-' + releaseId + '" onclick="storeSaveSerial(' + releaseId + ',\'' + escJs(currentSerial) + '\')">Save</button>' +
-        '<button class="btn btn-sm" onclick="storeCancelEditSerial(' + releaseId + ',\'' + escJs(currentSerial) + '\')">Cancel</button>' +
+        '<button class="btn btn-sm btn-primary" id="serial-save-' + releaseId + '"' + act('click', 'storeSaveSerial', [releaseId, currentSerial]) + '>Save</button>' +
+        '<button class="btn btn-sm"' + act('click', 'storeCancelEditSerial', [releaseId, currentSerial]) + '>Cancel</button>' +
         '</div></div>';
     var input = document.getElementById('serial-input-' + releaseId);
     input.focus();
@@ -387,7 +388,7 @@ function storeCancelEditSerial(releaseId, originalSerial) {
     if (!cell) return;
     cell.innerHTML =
         '<span class="serial-number' + (manualFlag ? ' serial-manual' : '') + '">' + escHtml(originalSerial) + '</span>' +
-        '<button class="btn-icon" title="Edit serial" onclick="storeBeginEditSerial(' + releaseId + ',\'' + escJs(originalSerial) + '\')">✎</button>';
+        '<button class="btn-icon" title="Edit serial"' + act('click', 'storeBeginEditSerial', [releaseId, originalSerial]) + '>✎</button>';
 }
 
 // ---- Price range refresh ----
@@ -500,8 +501,8 @@ function storeMarkSoldModal(releaseId) {
         '<input id="sold-price-input" class="form-input" type="text" placeholder="e.g. USD 25.00">' +
         '</div>' +
         '<div class="modal-actions">' +
-        '<button class="btn" onclick="_closeModal()">Cancel</button>' +
-        '<button class="btn btn-primary" onclick="storeConfirmSold(' + releaseId + ')">Mark as Sold</button>' +
+        '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>' +
+        '<button class="btn btn-primary"' + act('click', 'storeConfirmSold', [releaseId]) + '>Mark as Sold</button>' +
         '</div>';
     _showModal(html);
 }
@@ -533,8 +534,8 @@ function storeRemoveConfirm(releaseId, serial, artist, title) {
         '</p>' +
         '<p class="modal-note">Note: Your Discogs account is not affected. A re-sync will restore the record to this app.</p>' +
         '<div class="modal-actions">' +
-        '<button class="btn" onclick="_closeModal()">Cancel</button>' +
-        '<button class="btn btn-danger" onclick="storeConfirmRemove(' + releaseId + ')">Delete Permanently</button>' +
+        '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>' +
+        '<button class="btn btn-danger"' + act('click', 'storeConfirmRemove', [releaseId]) + '>Delete Permanently</button>' +
         '</div>';
     _showModal(html);
 }
@@ -564,12 +565,12 @@ function storeNewBatchPrompt() {
         '<h2 class="modal-title">New Batch</h2>' +
         '<div class="modal-form">' +
         '<label class="form-label">Batch name</label>' +
-        '<input id="new-batch-name" class="form-input" type="text" placeholder="e.g. NYC Flea Market May 2026" ' +
-        'onkeydown="if(event.key===\'Enter\')storeCreateBatch()">' +
+        '<input id="new-batch-name" class="form-input" type="text" placeholder="e.g. NYC Flea Market May 2026"' +
+        act('enter', 'storeCreateBatch') + '>' +
         '</div>' +
         '<div class="modal-actions">' +
-        '<button class="btn" onclick="_closeModal()">Cancel</button>' +
-        '<button class="btn btn-primary" onclick="storeCreateBatch()">Create</button>' +
+        '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>' +
+        '<button class="btn btn-primary"' + act('click', 'storeCreateBatch') + '>Create</button>' +
         '</div>';
     _showModal(html);
     setTimeout(function () {
@@ -594,8 +595,8 @@ function storeDeleteBatchConfirm(batchId, batchName) {
         '<p class="modal-body">Delete batch "<strong>' + escHtml(batchName) + '</strong>"? ' +
         'Records in this batch will be unassigned but not deleted from your store.</p>' +
         '<div class="modal-actions">' +
-        '<button class="btn" onclick="_closeModal()">Cancel</button>' +
-        '<button class="btn btn-danger" onclick="storeConfirmDeleteBatch(' + batchId + ')">Delete Batch</button>' +
+        '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>' +
+        '<button class="btn btn-danger"' + act('click', 'storeConfirmDeleteBatch', [batchId]) + '>Delete Batch</button>' +
         '</div>';
     _showModal(html);
 }
@@ -621,7 +622,7 @@ function storeAssignBatchModal(releaseId, currentBatchId) {
             _showModal(
                 '<h2 class="modal-title">No Batches</h2>' +
                 '<p class="modal-body">Create a batch first using the "+ New Batch" button.</p>' +
-                '<div class="modal-actions"><button class="btn btn-primary" onclick="_closeModal()">OK</button></div>'
+                '<div class="modal-actions"><button class="btn btn-primary"' + act('click', '_closeModal') + '>OK</button></div>'
             );
             return;
         }
@@ -636,8 +637,8 @@ function storeAssignBatchModal(releaseId, currentBatchId) {
             '<select id="batch-select" class="form-input">' + opts + '</select>' +
             '</div>' +
             '<div class="modal-actions">' +
-            '<button class="btn" onclick="_closeModal()">Cancel</button>' +
-            '<button class="btn btn-primary" onclick="storeConfirmAssignBatch(' + releaseId + ')">Assign</button>' +
+            '<button class="btn"' + act('click', '_closeModal') + '>Cancel</button>' +
+            '<button class="btn btn-primary"' + act('click', 'storeConfirmAssignBatch', [releaseId]) + '>Assign</button>' +
             '</div>';
         _showModal(html);
     });
@@ -732,7 +733,7 @@ function _openPrintWindow(storeItems, releases, batches, title) {
         '<div class="footer">Total records: ' + rows.length +
         (totalMedian > 0 ? ' &nbsp;·&nbsp; Total lowest value: ' + Number(totalMedian).toFixed(2) : '') +
         '</div>' +
-        '<script>window.onload=function(){window.print();};<\/script>' +
+        '<script>window.onload=function(){window.print();};<\/script>' + // eslint-disable-line no-useless-escape -- keeps </script> from closing an inline script if this is ever inlined
         '</body></html>';
 
     var w = window.open('', '_blank');

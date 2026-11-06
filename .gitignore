@@ -7,3 +7,6 @@ split_app.py
 /docs/handoff.md
 /docs/plans/
 /.claude/HANDOFF.prev.md
+
+# npm
+/node_modules/

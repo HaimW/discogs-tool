@@ -4,6 +4,36 @@ var _marketplaceSyncRunning = false;
 // Background polls skip items checked within this window to avoid redundant calls.
 var MARKETPLACE_STALE_MS = 20 * 60 * 1000;
 
+// Price history (F10): a reading is kept when it differs from the last kept
+// one, and at least once a day otherwise, so a sparkline has regular points
+// without storing every 30-minute poll.
+var PRICE_HISTORY_HEARTBEAT_MS = 24 * 60 * 60 * 1000;
+
+function _priceReadingChanged(prev, numForSale, lowestPrice, currency) {
+    return !prev ||
+        (prev.num_for_sale || 0) !== numForSale ||
+        (prev.lowest_price == null ? null : prev.lowest_price) !== lowestPrice ||
+        (prev.currency || null) !== currency;
+}
+
+// Decides whether this reading goes into price_history. `existing` is the
+// marketplace_stats row before this check (or undefined).
+function _shouldSnapshot(existing, numForSale, lowestPrice, currency, nowMs) {
+    if (!existing || !existing.snapshot_at) return true;
+    if (_priceReadingChanged(existing, numForSale, lowestPrice, currency)) return true;
+    var lastMs = dateMs(existing.snapshot_at);
+    return lastMs === null || nowMs - lastMs >= PRICE_HISTORY_HEARTBEAT_MS;
+}
+
+// Everything kept about a want, removed with it: its marketplace reading, its
+// alerts and its price history (M2). Safe to call for an id with none of these.
+async function removeWantData(releaseId) {
+    await dbDelete('marketplace_stats', releaseId);
+    var removedAlerts = await dbDeleteByIndex('notifications', 'release_id', releaseId);
+    await dbDeleteByIndex('price_history', 'release_id', releaseId);
+    if (removedAlerts) updateNotifBadge();
+}
+
 async function syncMarketplaceStats(silent, config) {
     if (_marketplaceSyncRunning) return;
     _marketplaceSyncRunning = true;
@@ -23,7 +53,8 @@ async function syncMarketplaceStats(silent, config) {
             allStats.forEach(function (s) { statsMap[s.id] = s; });
             toCheck = wants.filter(function (w) {
                 var s = statsMap[w.id];
-                return !s || !s.checked_at || new Date(s.checked_at).getTime() < cutoff;
+                var checkedMs = s ? dateMs(s.checked_at) : null;
+                return checkedMs === null || checkedMs < cutoff;
             });
             if (toCheck.length === 0) return;
         }
@@ -44,7 +75,9 @@ async function syncMarketplaceStats(silent, config) {
                 var currency = (data && data.lowest_price) ? data.lowest_price.currency : null;
 
                 var existing = await dbGet('marketplace_stats', w.id);
-                var prevNum = existing ? (existing.num_for_sale || 0) : null;
+                // A row restored from a backup carries an old count, not one
+                // this browser saw: treat it as no baseline (M5).
+                var prevNum = (existing && !existing.baseline_restored) ? (existing.num_for_sale || 0) : null;
 
                 // Notify only when previously confirmed as 0 and now has listings.
                 // prevNum === null means never checked — record baseline silently.
@@ -62,12 +95,28 @@ async function syncMarketplaceStats(silent, config) {
                     updateNotifBadge();
                 }
 
+                var nowMs = Date.now();
+                var checkedAt = new Date(nowMs).toISOString();
+                var snapshotAt = existing ? (existing.snapshot_at || null) : null;
+                if (_shouldSnapshot(existing, numForSale, lowestPrice, currency, nowMs)) {
+                    await dbPut('price_history', {
+                        id: w.id + '_' + checkedAt,
+                        release_id: w.id,
+                        checked_at: checkedAt,
+                        num_for_sale: numForSale,
+                        lowest_price: lowestPrice,
+                        currency: currency
+                    });
+                    snapshotAt = checkedAt;
+                }
+
                 await dbPut('marketplace_stats', {
                     id: w.id,
                     num_for_sale: numForSale,
                     lowest_price: lowestPrice,
                     currency: currency,
-                    checked_at: new Date().toISOString()
+                    checked_at: checkedAt,
+                    snapshot_at: snapshotAt
                 });
             } catch (err) {
                 console.error('Marketplace stats error for ' + w.id + ':', err);
@@ -76,12 +125,17 @@ async function syncMarketplaceStats(silent, config) {
 
         if (_currentView === 'wantlist') renderWantList();
         if (!silent) {
-            showSyncBanner('Availability check complete!');
-            setTimeout(hideSyncBanner, 2000);
+            hideSyncBanner();
+            showToast('Availability check complete', 'success');
         }
     } finally {
         _marketplaceSyncRunning = false;
     }
+}
+
+function stopMarketplacePoll() {
+    clearInterval(_marketplacePollInterval);
+    _marketplacePollInterval = null;
 }
 
 function startMarketplacePoll() {
@@ -123,15 +177,16 @@ function openNotifPanel() {
         });
         Promise.all(markPromises).then(function () { updateNotifBadge(); });
 
-        notifications.sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+        // Undated alerts sort last instead of scrambling the order (L5).
+        notifications.sort(function (a, b) { return (dateMs(b.created_at) || 0) - (dateMs(a.created_at) || 0); });
 
         var html = '<div class="notif-header">';
         html += '<span class="notif-title">Marketplace Alerts</span>';
         html += '<div class="notif-header-actions">';
         if (notifications.length > 0) {
-            html += '<button class="btn btn-sm btn-danger" onclick="clearAllNotifications()">Clear all</button>';
+            html += '<button class="btn btn-sm btn-danger"' + act('click', 'clearAllNotifications') + '>Clear all</button>';
         }
-        html += '<button class="btn btn-sm" onclick="closeNotifPanel()">&times;</button>';
+        html += '<button class="btn btn-sm"' + act('click', 'closeNotifPanel') + '>&times;</button>';
         html += '</div></div>';
 
         html += '<div class="notif-list">';
@@ -149,7 +204,7 @@ function openNotifPanel() {
                 html += '</span>';
                 html += '<span class="notif-time">' + formatTimeAgo(n.created_at) + '</span>';
                 html += '</div></div>';
-                html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + n.release_id + '" target="_blank" rel="noopener" onclick="closeNotifPanel()">Buy &#128722;</a>';
+                html += '<a class="btn btn-sm btn-primary" href="https://www.discogs.com/sell/release/' + n.release_id + '" target="_blank" rel="noopener"' + act('click', 'closeNotifPanel') + '>Buy &#128722;</a>';
                 html += '</div>';
             });
         }
@@ -173,8 +228,12 @@ function clearAllNotifications() {
     });
 }
 
+// '' for a missing or malformed date (L5), rather than "NaNd ago". A time a
+// little ahead of this clock (another device's) reads as "just now".
 function formatTimeAgo(iso) {
-    var diff = Date.now() - new Date(iso).getTime();
+    var ms = dateMs(iso);
+    if (ms === null) return '';
+    var diff = Date.now() - ms;
     var mins = Math.floor(diff / 60000);
     if (mins < 1) return 'just now';
     if (mins < 60) return mins + 'm ago';
@@ -240,13 +299,13 @@ function wlDigDeeper() {
 
         var html = '<div class="wl-dig-deeper">';
         html += '<div class="wl-dd-header"><h3>🔍 Dig Deeper — Gaps in Your Collection</h3>';
-        html += '<button class="btn btn-clear" onclick="document.getElementById(\'wl-dig-deeper-panel\').style.display=\'none\'">Close</button></div>';
+        html += '<button class="btn btn-clear"' + act('click', 'wlCloseDigDeeper') + '>Close</button></div>';
         html += '<p class="wl-dd-subtitle">Genres, styles, and artists from your want list not yet represented in your collection:</p>';
 
         if (topNewGenres.length > 0) {
             html += '<div class="wl-dd-section"><h4>New Genres</h4><div class="genre-pills">';
             topNewGenres.forEach(function (g) {
-                html += '<span class="genre-pill" onclick="wlSetFilter(\'genre\',\'' + escJs(g) + '\')">' +
+                html += '<span class="genre-pill"' + act('click', 'wlSetFilter', ['genre', g]) + '>' +
                     escHtml(g) + ' <span class="pill-count">' + newGenreCounts[g] + '</span></span>';
             });
             html += '</div></div>';
@@ -277,3 +336,8 @@ function wlDigDeeper() {
     });
 }
 
+
+function wlCloseDigDeeper() {
+    var panel = document.getElementById('wl-dig-deeper-panel');
+    if (panel) panel.style.display = 'none';
+}

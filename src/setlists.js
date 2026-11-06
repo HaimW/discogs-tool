@@ -30,8 +30,7 @@ function addTrackToSetlist(setlistId, track) {
         });
         sl.updated_at = new Date().toISOString();
         return dbPut('setlists', sl).then(function () {
-            showSyncBanner('Added to "' + sl.name + '"');
-            setTimeout(hideSyncBanner, 1200);
+            showToast('Added to "' + sl.name + '"', 'success');
         });
     });
 }
@@ -256,6 +255,14 @@ function _popoverOutsideHandler(e) {
     if (pop && !pop.contains(e.target)) closeAllPopovers();
 }
 
+// One export menu entry: export, then close the menu.
+function exportSetlistAs(id, format) {
+    if (format === 'm3u') exportSetlistM3U(id);
+    else if (format === 'txt') exportSetlistTxt(id);
+    else if (format === 'csv') exportSetlistCsv(id);
+    toggleExportMenu(id);
+}
+
 function closeAllPopovers() {
     document.querySelectorAll('.popover').forEach(function (p) { p.remove(); });
     document.removeEventListener('click', _popoverOutsideHandler);
@@ -269,18 +276,18 @@ function renderSetlists() {
         var html = '<div class="collection-header"><div class="collection-stats">' +
             '<h1>Setlists</h1>' +
             '<span class="stat-count">' + setlists.length + ' setlist' + (setlists.length === 1 ? '' : 's') + '</span>' +
-            '<button class="btn btn-primary" onclick="promptNewSetlist()">+ New Setlist</button>' +
+            '<button class="btn btn-primary"' + act('click', 'promptNewSetlist') + '>+ New Setlist</button>' +
             '</div></div>';
         if (setlists.length === 0) {
             html += '<div class="empty-state"><p class="empty-title">No setlists yet</p>' +
                 '<p class="empty-subtitle">Create a setlist to prep your next gig</p>' +
-                '<button class="btn btn-primary btn-large" onclick="promptNewSetlist()">+ New Setlist</button></div>';
+                '<button class="btn btn-primary btn-large"' + act('click', 'promptNewSetlist') + '>+ New Setlist</button></div>';
         } else {
             html += '<div class="setlist-index">';
             setlists.forEach(function (sl) {
                 var count = (sl.tracks || []).length;
                 var updated = (sl.updated_at || '').substring(0, 10);
-                html += '<div class="setlist-card" onclick="navigate(\'setlist\',{setlistId:' + sl.id + '})">' +
+                html += '<div class="setlist-card"' + act('click', 'navigate', ['setlist', { setlistId: sl.id }]) + '>' +
                     '<div class="setlist-card-name">' + escHtml(sl.name) + '</div>' +
                     '<div class="setlist-card-meta">' + count + ' track' + (count === 1 ? '' : 's') + ' &middot; updated ' + updated + '</div>' +
                     '</div>';
@@ -302,24 +309,24 @@ function renderSetlist(setlistId) {
         results[1].forEach(function (m) { metaById[m.id] = m; });
         var tracks = sl.tracks || [];
 
-        var html = '<span class="back-link" onclick="navigate(\'setlists\')">&larr; Back to setlists</span>';
+        var html = '<span class="back-link"' + act('click', 'navigate', ['setlists']) + '>&larr; Back to setlists</span>';
         html += '<div class="setlist-detail">';
         html += '<div class="setlist-header">' +
-            '<input type="text" class="setlist-name-input" value="' + escHtml(sl.name) + '" onchange="renameSetlist(' + sl.id + ', this.value)">' +
+            '<input type="text" class="setlist-name-input" value="' + escHtml(sl.name) + '"' + act('change', 'renameSetlist', [sl.id, ACT_VALUE]) + '>' +
             '<div class="setlist-actions">' +
-                '<button class="btn btn-play-all"' + (tracks.length === 0 ? ' disabled' : '') + ' onclick="playSetlist(' + sl.id + ')">&#9654; Play all</button>' +
+                '<button class="btn btn-play-all"' + (tracks.length === 0 ? ' disabled' : '') + act('click', 'playSetlist', [sl.id]) + '>&#9654; Play all</button>' +
                 '<div class="setlist-export">' +
-                    '<button class="btn"' + (tracks.length === 0 ? ' disabled' : '') + ' onclick="toggleExportMenu(' + sl.id + ')">Export &#9662;</button>' +
+                    '<button class="btn"' + (tracks.length === 0 ? ' disabled' : '') + act('click', 'toggleExportMenu', [sl.id]) + '>Export &#9662;</button>' +
                     '<div class="export-menu popover" id="export-menu-' + sl.id + '" style="display:none;">' +
-                        '<div class="popover-item" onclick="exportSetlistM3U(' + sl.id + ');toggleExportMenu(' + sl.id + ')">M3U playlist</div>' +
-                        '<div class="popover-item" onclick="exportSetlistTxt(' + sl.id + ');toggleExportMenu(' + sl.id + ')">Plain text (.txt)</div>' +
-                        '<div class="popover-item" onclick="exportSetlistCsv(' + sl.id + ');toggleExportMenu(' + sl.id + ')">CSV with BPM/key</div>' +
+                        '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'm3u']) + '>M3U playlist</div>' +
+                        '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'txt']) + '>Plain text (.txt)</div>' +
+                        '<div class="popover-item"' + act('click', 'exportSetlistAs', [sl.id, 'csv']) + '>CSV with BPM/key</div>' +
                     '</div>' +
                 '</div>' +
-                '<button class="btn btn-danger" onclick="deleteSetlist(' + sl.id + ')">Delete</button>' +
+                '<button class="btn btn-danger"' + act('click', 'deleteSetlist', [sl.id]) + '>Delete</button>' +
             '</div>' +
         '</div>';
-        html += '<textarea class="setlist-notes" placeholder="Setlist notes (venue, vibe, intro track idea...)" onchange="saveSetlistNotes(' + sl.id + ', this.value)">' + escHtml(sl.notes || '') + '</textarea>';
+        html += '<textarea class="setlist-notes" placeholder="Setlist notes (venue, vibe, intro track idea...)"' + act('change', 'saveSetlistNotes', [sl.id, ACT_VALUE]) + '>' + escHtml(sl.notes || '') + '</textarea>';
 
         if (tracks.length === 0) {
             html += '<div class="empty-state"><p class="empty-title">Empty setlist</p>' +
@@ -331,7 +338,7 @@ function renderSetlist(setlistId) {
                 html += '<div class="video-item setlist-row" draggable="true" data-index="' + i + '" data-youtube-id="' + escHtml(t.youtubeId) + '" data-title="' + escHtml(t.title) + '" data-artist="' + escHtml(t.artist || '') + '" data-cover="' + escHtml(t.cover || '') + '" data-release-id="' + (t.releaseId || '') + '" data-meta-id="' + escHtml(t.metaId || '') + '">' +
                     '<span class="drag-handle" title="Drag to reorder">&#8942;</span>' +
                     '<span class="setlist-num">' + (i + 1) + '</span>' +
-                    '<button class="play-btn" onclick="playFromSetlist(' + sl.id + ',' + i + ')"><span class="play-icon">&#9654;</span></button>';
+                    '<button class="play-btn"' + act('click', 'playFromSetlist', [sl.id, i]) + '><span class="play-icon">&#9654;</span></button>';
                 if (t.cover) {
                     html += '<img class="track-thumb" src="' + escHtml(t.cover) + '" alt="" loading="lazy">';
                 } else {
@@ -355,7 +362,7 @@ function renderSetlist(setlistId) {
                 html += energyBadge(meta);
                 if (meta.rating) html += '<span class="track-badge badge-rating">' + ratingStars(meta.rating) + '</span>';
                 html += '</span>';
-                html += '<button class="meta-btn" onclick="removeTrackFromSetlist(' + sl.id + ',' + i + ')" title="Remove">&times;</button>';
+                html += '<button class="meta-btn"' + act('click', 'removeTrackFromSetlist', [sl.id, i]) + ' title="Remove">&times;</button>';
                 html += '</div>';
             });
             html += '</div>';

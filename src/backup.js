@@ -20,15 +20,15 @@ function renderBackup() {
         '<div class="backup-card-icon">&#8659;</div>' +
         '<h2 class="backup-card-title">Download full backup</h2>' +
         '<p class="backup-card-desc">Exports your entire local database — collection, want list, setlists, track metadata, store inventory and API config — to a single JSON file. Everything needed to fully recover if you clear browser data.</p>' +
-        '<button class="btn btn-primary btn-large" onclick="exportFullBackup()">Download vinyl-backup-&lt;date&gt;.json</button>' +
+        '<button class="btn btn-primary btn-large"' + act('click', 'exportFullBackup') + '>Download vinyl-backup-&lt;date&gt;.json</button>' +
         '</div>' +
 
         '<div class="backup-card">' +
         '<div class="backup-card-icon">&#8657;</div>' +
         '<h2 class="backup-card-title">Restore from backup</h2>' +
         '<p class="backup-card-desc">Pick a <code>.json</code> file previously downloaded from this page. Records are <em>merged</em> (not wiped) — existing data is kept, backup data is upserted on top. Safe to run twice.</p>' +
-        '<button class="btn btn-large" onclick="document.getElementById(\'backup-file-input\').click()">Choose backup file&hellip;</button>' +
-        '<input type="file" id="backup-file-input" accept=".json" style="display:none" onchange="importBackupFile(this)">' +
+        '<button class="btn btn-large"' + act('click', 'backupChooseFile') + '>Choose backup file&hellip;</button>' +
+        '<input type="file" id="backup-file-input" accept=".json" style="display:none"' + act('change', 'importBackupFile', [ACT_THIS]) + '>' +
         '</div>' +
 
         '</div>' + // .backup-grid
@@ -62,7 +62,8 @@ function exportFullBackup() {
         dbGetAll('setlists'),
         dbGetAll('store_items'),
         dbGetAll('store_batches'),
-        dbGetAll('notifications')
+        dbGetAll('notifications'),
+        dbGetAll('price_history')
     ]).then(function (r) {
         var payload = {
             _version: 2,
@@ -77,7 +78,10 @@ function exportFullBackup() {
             },
             wantlist: {
                 wants: r[5],
-                marketplace_stats: r[6]
+                marketplace_stats: r[6],
+                // Accrued over time from marketplace polls; cannot be
+                // re-fetched from Discogs, so it travels with the backup.
+                price_history: r[12]
             },
             track_meta: r[7],
             setlists: r[8],
@@ -106,6 +110,29 @@ function _bulkPut(storeName, records) {
     });
 }
 
+// Marketplace readings from a backup (M5). A local reading is newer than any
+// backup's, so it is kept. A backup's reading fills a gap for display, but is
+// flagged so the next poll records a fresh baseline instead of comparing
+// against an old count: an alert needs a 0 -> 1+ change this browser saw.
+function _restoreMarketplaceStats(records) {
+    if (!records.length) return Promise.resolve(0);
+    return dbGetAll('marketplace_stats').then(function (local) {
+        var have = {};
+        local.forEach(function (s) { have[s.id] = true; });
+        var fresh = records.filter(function (r) { return r && !have[r.id]; }).map(function (r) {
+            var copy = Object.assign({}, r);
+            copy.baseline_restored = true;
+            copy.checked_at = null; // due for a check at the next poll
+            return copy;
+        });
+        return _bulkPut('marketplace_stats', fresh);
+    });
+}
+
+function backupChooseFile() {
+    document.getElementById('backup-file-input').click();
+}
+
 function importBackupFile(input) {
     var file = input.files[0];
     if (!file) return;
@@ -116,11 +143,11 @@ function importBackupFile(input) {
         try {
             backup = JSON.parse(e.target.result);
         } catch (err) {
-            alert('Could not parse backup file: ' + err.message);
+            showToast('Could not read the backup file: ' + err.message, 'error');
             return;
         }
         if (!backup || backup._app !== 'VinylCollectionPlayer') {
-            alert('This does not look like a valid Vinyl Collection Player backup file.');
+            showToast('This does not look like a Vinyl Collection Player backup file.', 'error');
             return;
         }
 
@@ -140,10 +167,11 @@ function importBackupFile(input) {
             _bulkPut('folders',           col.folders            || []),
             _bulkPut('tracklist',         col.tracklist          || []),
             _bulkPut('wants',             wl.wants               || []),
-            _bulkPut('marketplace_stats', wl.marketplace_stats   || []),
+            _restoreMarketplaceStats(wl.marketplace_stats || []),
             _bulkPut('store_items',       st.items               || []),
             _bulkPut('store_batches',     st.batches             || []),
-            _bulkPut('notifications',     backup.notifications   || [])
+            _bulkPut('notifications',     backup.notifications   || []),
+            _bulkPut('price_history',     wl.price_history       || [])
         ]).then(function (counts) {
             var parts = [];
             if (counts[3])  parts.push(counts[3]  + ' releases');
@@ -153,14 +181,15 @@ function importBackupFile(input) {
             if (counts[1])  parts.push(counts[1]  + ' track metadata record' + (counts[1] === 1 ? '' : 's'));
             if (counts[9])  parts.push(counts[9]  + ' store item' + (counts[9] === 1 ? '' : 's'));
             if (counts[10]) parts.push(counts[10] + ' store batch' + (counts[10] === 1 ? '' : 'es'));
+            if (counts[12]) parts.push(counts[12] + ' price reading' + (counts[12] === 1 ? '' : 's'));
             var msg = 'Restored' + (v > 1 ? ' (v' + v + ')' : '') + ': ' +
                 (parts.length ? parts.join(', ') : 'nothing to restore');
-            showSyncBanner(msg);
-            setTimeout(hideSyncBanner, 5000);
+            hideSyncBanner();
+            showToast(msg, 'success', 6000);
             renderCurrentView();
         }).catch(function (err) {
             hideSyncBanner();
-            alert('Restore failed: ' + err.message);
+            showToast('Restore failed: ' + err.message, 'error');
         });
     };
     reader.readAsText(file);
