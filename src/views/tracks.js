@@ -44,6 +44,7 @@ function renderTracks() {
                 cover: r.thumb_url || '',
                 bpm: m.bpm != null ? m.bpm : null,
                 key: m.key || null,
+                meta: m,
                 rating: m.rating || null,
                 shelf: m.shelf || '',
                 tags: m.tags || []
@@ -191,8 +192,8 @@ function renderTracks() {
                     '</div>';
 
                 html += '<span class="track-badges">';
-                if (row.bpm != null) html += '<span class="track-badge badge-bpm">' + row.bpm + '</span>';
-                if (row.key) html += '<span class="track-badge badge-key">' + escHtml(row.key) + camelotRelativeHtml(row.key) + '</span>';
+                if (row.bpm != null) html += trackBpmBadgeHtml(row.meta);
+                if (row.key) html += trackKeyBadgeHtml(row.key, row.meta);
                 if (row.rating) html += '<span class="track-badge badge-rating">' + ratingStars(row.rating) + '</span>';
                 if (row.shelf) html += '<span class="track-badge badge-shelf">' + escHtml(row.shelf) + '</span>';
                 html += '</span>';
@@ -215,6 +216,25 @@ function renderTracks() {
 // What the list says when it has no rows (P6): nothing synced yet, records
 // without video links yet, a BPM/key filter when no track has either, or
 // filters that match nothing.
+// The key badge for a track row: the shared colour-coded Camelot chip, as on
+// the release page, queue, setlists and suggestions, marked as an estimate
+// when the analyzer set it and nobody has verified it. Hand-typed keys ("8a",
+// "Am") are normalised first; anything unrecognised keeps a plain badge.
+function trackKeyBadgeHtml(key, meta) {
+    meta = meta || {};
+    var code = camelotCode(key);
+    if (code) {
+        return camelotChip(code, { estimated: meta.key_source === 'analysis' && !meta.bpm_verified });
+    }
+    return '<span class="track-badge badge-key">' + escHtml(key) + '</span>';
+}
+
+// The tempo badge for a track row: the shared one from the release page, so an
+// analyzer estimate is dashed with "~" and its confidence in the tooltip.
+function trackBpmBadgeHtml(meta) {
+    return bpmBadge(meta || {});
+}
+
 function tracksEmptyHtml(videoCount, releaseCount, allMeta, tf) {
     if (videoCount === 0) {
         var sub = releaseCount === 0

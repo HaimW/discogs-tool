@@ -172,6 +172,11 @@ These are not features — they are prerequisites for a paid product.
 - **Fix:** A responsive nav (wrap or a compact menu on narrow screens) so nothing is wider than the viewport; a browser test that no page scrolls sideways at 360 px.
 - **Status:** [ ]
 
+#### L12 — All Tracks shows every key in plain gold
+- **Where:** `src/views/tracks.js` (the row's key badge).
+- **What:** Reported 2026-11-09 with a screenshot: the All Tracks list drew its own accent-coloured key badge instead of the shared Camelot chip, so every key was gold while the release page, queue, setlists and suggestions showed Camelot colours.
+- **Status:** [x] Fixed 2026-11-09. `trackKeyBadgeHtml()` draws the shared `camelotChip()` (colour, relative key, dashed "~" when the analyzer set it and it is not verified); hand-typed keys are normalised with `camelotCode()` first; an unrecognised key keeps a plain escaped badge. The BPM badge had the same gap and now uses the shared `bpmBadge()` (`trackBpmBadgeHtml()`): analyzer tempos are dashed with "~" and their confidence in the tooltip, and the badge reads "121.78 BPM". `tests/tracks.test.js` (5 tests, all failed before the fix).
+
 ### Triage table
 
 | ID | Severity | One-line | Effort | Status |
@@ -191,6 +196,7 @@ These are not features — they are prerequisites for a paid product.
 | L8 | Low | Tempo bonus jumps at 6 % → further tempos outrank closer ones | S | ✅ |
 | L11 | Low | Pages scroll sideways below ~910 px (top nav too wide) | S–M | open |
 | L10 | Low | Open queue panel shows stale rows after Play next / setlist / want-list play | S | ✅ |
+| L12 | Low | All Tracks shows every key in plain gold instead of its Camelot colour | S | ✅ |
 | L9 | Low | Queue list (and a dragged panel) jumps on every redraw | S | ✅ |
 
 ---
