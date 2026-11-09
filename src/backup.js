@@ -127,13 +127,20 @@ function buildBackupPayload(stores, nowIso) {
     };
 }
 
-function exportFullBackup() {
+// The full backup document as of now: what the download holds, and what the
+// Analyzer tab sends to the desktop analyzer.
+function buildFullBackup() {
     return Promise.all(BACKUP_STORES.map(function (name) { return dbGetAll(name); })).then(function (r) {
         var stores = {};
         BACKUP_STORES.forEach(function (name, i) { stores[name] = r[i]; });
-        var now = new Date().toISOString();
-        var payload = buildBackupPayload(stores, now);
-        downloadBlob('vinyl-backup-' + now.slice(0, 10) + '.json', 'application/json', JSON.stringify(payload, null, 2));
+        return buildBackupPayload(stores, new Date().toISOString());
+    });
+}
+
+function exportFullBackup() {
+    return buildFullBackup().then(function (payload) {
+        downloadBlob('vinyl-backup-' + payload.exported_at.slice(0, 10) + '.json', 'application/json',
+            JSON.stringify(payload, null, 2));
     }).catch(function (err) {
         showToast('Backup failed: ' + err.message, 'error');
     });
@@ -379,27 +386,39 @@ function importBackupFile(input) {
             showToast('Could not read the backup file: ' + err.message, 'error');
             return;
         }
-        var backup = _normalizeBackup(raw);
-        if (!backup) {
-            showToast('This does not look like a Vinyl Collection Player backup file.', 'error');
-            return;
-        }
-        if (_syncRunning) {  // a sync started while the file was read
-            showToast(RESTORE_WHILE_SYNCING, 'error');
-            return;
-        }
-
-        showSyncBanner('Restoring backup…');
-        restoreBackup(backup).then(function (res) {
-            hideSyncBanner();
-            showToast(_restoreMessage(backup.version, res.counts, res.tokenOutcome), 'success', 6000);
-            renderCurrentView();
+        restoreParsedBackup(raw).then(function (res) {
+            if (res) renderCurrentView();
         }).catch(function (err) {
-            hideSyncBanner();
             showToast('Restore failed: ' + err.message, 'error');
         });
     };
     reader.readAsText(file);
+}
+
+// Restores an already parsed backup file — anything Restore from backup takes,
+// including the desktop analyzer's result — with the same checks, banner and
+// toast. Resolves to restoreBackup's result, or null when nothing was restored
+// (the reason has been toasted). Never rejects.
+function restoreParsedBackup(raw) {
+    var backup = _normalizeBackup(raw);
+    if (!backup) {
+        showToast('This does not look like a Vinyl Collection Player backup file.', 'error');
+        return Promise.resolve(null);
+    }
+    if (_syncRunning) {  // a sync started while the file was read
+        showToast(RESTORE_WHILE_SYNCING, 'error');
+        return Promise.resolve(null);
+    }
+    showSyncBanner('Restoring backup…');
+    return restoreBackup(backup).then(function (res) {
+        hideSyncBanner();
+        showToast(_restoreMessage(backup.version, res.counts, res.tokenOutcome), 'success', 6000);
+        return res;
+    }, function (err) {
+        hideSyncBanner();
+        showToast('Restore failed: ' + err.message, 'error');
+        return null;
+    });
 }
 
 function exportSetlistM3U(id) {

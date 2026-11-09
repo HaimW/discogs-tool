@@ -1748,6 +1748,30 @@ body { padding-bottom: var(--player-height); }
     font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
     color: var(--text-muted); white-space: pre-wrap;
 }
+/* The flex rows above would otherwise override the hidden attribute. */
+.analyzer-page [hidden] { display: none !important; }
+.analyzer-planline b { color: var(--accent); font-weight: 400; }
+.analyzer-card .meta-field.checkbox .hint { display: block; font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.analyzer-status { font-size: 12px; color: var(--text-muted); margin-top: 6px; min-height: 1em; }
+.analyzer-status:empty { display: none; }
+.analyzer-status-err { color: #e5533d; }
+/* Same language as the Backup page warning (amber) and error toasts (red). */
+.analyzer-card .analyzer-banner {
+    border-radius: var(--radius-sm); padding: 10px 12px; margin: 12px 0 0;
+    font-size: 13px; line-height: 1.5; color: var(--text);
+}
+.analyzer-card .analyzer-ok { background: rgba(212, 160, 38, 0.08); border: 1px solid rgba(212, 160, 38, 0.35); }
+.analyzer-card .analyzer-warn { background: rgba(192, 57, 43, 0.10); border: 1px solid #e5533d; }
+.analyzer-card .btn-text {
+    background: none; border: none; padding: 0; font: inherit; color: var(--accent);
+    text-decoration: underline; cursor: pointer;
+}
+.analyzer-dialog {
+    background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 24px 28px; margin: auto;
+    width: calc(100% - 40px); max-width: 520px;
+}
+.analyzer-dialog::backdrop { background: rgba(0, 0, 0, 0.75); }
 
 /* ============ TOASTS (src/toast.js) ============ */
 

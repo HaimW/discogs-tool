@@ -314,3 +314,378 @@ fn scratch_audio_is_not_left_behind() {
         .collect();
     assert!(leftovers.is_empty(), "temp audio left behind: {leftovers:?}");
 }
+
+// --- The dry run -----------------------------------------------------------
+//
+// A dry run is only useful if it predicts what a real run with the same
+// options would do, and a real run consults the resume ledger. These pin the
+// dry run to that ledger: same path, same settings hash, same retry budget.
+
+use analyzer_cli::{dry_run, settings_hash_for, DryRun, Frontend};
+use analyzer_core::ledger::{Ledger, ResumeOutcome};
+
+fn long_video(id: &str) -> Value {
+    json!({
+        "id": id, "release_id": 1, "title": "Blue Monday", "uri": "u",
+        "youtube_id": id.split('_').nth(1).unwrap(), "duration": 3600
+    })
+}
+
+/// Every ledger state a dry run has to count, plus one of each non-work plan
+/// decision.
+fn dry_run_backup_json() -> String {
+    json!({
+        "_app": "VinylCollectionPlayer", "_version": 2,
+        "collection": {
+            "releases": [], "tracklist": [],
+            "videos": [
+                video("1_done"),       // done in the ledger
+                video("1_retry"),      // failed once: retried
+                video("1_spent"),      // failed max_attempts times: skipped
+                video("1_new"),        // not in the ledger at all
+                video("1_mine"),       // the user's own bpm/key: Skip
+                long_video("1_mix")    // an hour long: Review
+            ]
+        },
+        "track_meta": [
+            // An earlier run's result, restored into the web app. The plan
+            // re-analyses these on purpose; only the ledger stops the re-work.
+            {"id": "1_done", "bpm": 124.0, "key": "8A",
+             "bpm_source": "analysis", "key_source": "analysis"},
+            {"id": "1_mine", "bpm": 100.0, "key": "5A", "energy": 3, "bpm_verified": true}
+        ]
+    })
+    .to_string()
+}
+
+fn some_result() -> AnalysisResult {
+    AnalysisResult {
+        bpm: 124.0,
+        bpm_confidence: 0.97,
+        key: "8A".into(),
+        key_musical: "A minor".into(),
+        key_strength: 0.8,
+        energy: Some(7),
+        energy_score: None,
+        bpm_method: None,
+        bpm_second_opinion: None,
+        analyzed_at: "2026-09-04T12:00:00Z".into(),
+        analyzer_version: "test".into(),
+    }
+}
+
+/// A ledger as a real run with `second_opinion` would have left it.
+fn write_ledger(path: &Path, second_opinion: &str) {
+    let mut ledger = Ledger::new(settings_hash_for(second_opinion), "2026-09-04T12:00:00Z");
+    let at = "2026-09-04T12:00:00Z";
+    ledger.record_success("1_done", some_result(), at);
+    ledger.record_failure("1_retry", "timeout", at);
+    for _ in 0..3 {
+        ledger.record_failure("1_spent", "video unavailable", at);
+    }
+    fs::write(path, ledger.to_json().unwrap()).unwrap();
+}
+
+fn dry_fixture(name: &str) -> Fixture {
+    let f = Fixture::new(name, false);
+    fs::write(f.dir.join("backup.json"), dry_run_backup_json()).unwrap();
+    f
+}
+
+fn plan(f: &Fixture) -> (DryRun, String) {
+    let mut out = Vec::new();
+    let report = dry_run(&f.options, &mut out).expect("dry run succeeded");
+    (report, String::from_utf8(out).unwrap())
+}
+
+#[test]
+fn the_settings_hash_matches_a_ledger_the_ui_wrote() {
+    // Taken from a real ledger written by the UI with its default "Always".
+    // If this moves, every existing ledger is silently discarded on the next
+    // run — bump ALGORITHM_TAG on purpose, never by accident.
+    assert_eq!(settings_hash_for("Always"), "a91b4430e1237ed4");
+    assert_ne!(settings_hash_for("Always"), settings_hash_for("Never"));
+}
+
+#[test]
+fn a_dry_run_counts_only_what_the_ledger_has_not_finished() {
+    let f = dry_fixture("dry-resumed");
+    write_ledger(&f.options.ledger, "Always");
+
+    let (report, text) = plan(&f);
+    assert_eq!(report.outstanding, 2, "1_retry and 1_new");
+    assert_eq!(report.will_run, 2);
+    assert_eq!(report.done, 1);
+    assert_eq!(report.exhausted, 1);
+    assert_eq!(report.skip, 1);
+    assert_eq!(report.review, 1);
+    assert_eq!(report.resume, ResumeOutcome::Resumed { completed: 1 });
+    assert!(!report.resume_warning());
+    assert!(text.contains("Resuming from"), "{text}");
+    assert!(text.contains(&f.options.ledger.display().to_string()), "{text}");
+    assert!(text.contains("max-attempts"), "the way out of 'failed too often': {text}");
+}
+
+#[test]
+fn a_bigger_retry_budget_brings_exhausted_failures_back() {
+    let mut f = dry_fixture("dry-attempts");
+    write_ledger(&f.options.ledger, "Always");
+    f.options.max_attempts = 5;
+
+    let (report, _) = plan(&f);
+    assert_eq!(report.outstanding, 3);
+    assert_eq!(report.exhausted, 0);
+}
+
+#[test]
+fn a_dry_run_reports_where_a_limited_run_stops() {
+    let mut f = dry_fixture("dry-limit");
+    write_ledger(&f.options.ledger, "Always");
+    f.options.limit = Some(1);
+
+    let (report, text) = plan(&f);
+    assert_eq!(report.outstanding, 2);
+    assert_eq!(report.will_run, 1);
+    assert!(text.contains("stops after 1"), "{text}");
+}
+
+#[test]
+fn without_a_ledger_a_dry_run_reports_a_fresh_start_and_the_full_count() {
+    let f = dry_fixture("dry-fresh");
+
+    let (report, text) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::FreshStart);
+    assert_eq!(report.outstanding, 4, "every Analyze item");
+    assert_eq!(report.done, 0);
+    assert_eq!(report.exhausted, 0);
+    assert!(report.resume_warning());
+    assert!(text.contains("No resume file found at"), "{text}");
+    assert_eq!(report.analysed_in_backup, 1);
+    assert!(
+        text.contains("different resume file"),
+        "the backup holds earlier results, so say where they may be: {text}"
+    );
+}
+
+#[test]
+fn a_ledger_from_other_settings_is_reported_as_discarded() {
+    let f = dry_fixture("dry-settings");
+    write_ledger(&f.options.ledger, "Never");
+
+    let (report, text) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::DiscardedSettingsChanged);
+    assert_eq!(report.outstanding, 4, "a discarded ledger means a run redoes everything");
+    assert_eq!(report.done, 0);
+    assert!(report.resume_warning());
+    assert!(text.contains("discarded"), "{text}");
+    assert!(text.contains("second"), "name the usual cause: {text}");
+}
+
+#[test]
+fn an_unreadable_ledger_is_reported_as_discarded() {
+    let f = dry_fixture("dry-junk");
+    fs::write(&f.options.ledger, "{ not json").unwrap();
+
+    let (report, text) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::DiscardedUnreadable);
+    assert_eq!(report.outstanding, 4);
+    assert!(report.resume_warning());
+    assert!(text.contains("unreadable"), "{text}");
+}
+
+#[test]
+fn a_dry_run_writes_nothing() {
+    let f = dry_fixture("dry-readonly");
+    plan(&f);
+    assert!(!f.options.ledger.exists(), "the dry run created a ledger");
+    assert!(!f.options.output.exists(), "the dry run wrote an export");
+    assert!(!f.options.work_dir.exists(), "the dry run created the work dir");
+
+    write_ledger(&f.options.ledger, "Always");
+    let before = fs::read(&f.options.ledger).unwrap();
+    let modified = fs::metadata(&f.options.ledger).unwrap().modified().unwrap();
+    plan(&f);
+    assert_eq!(fs::read(&f.options.ledger).unwrap(), before, "the dry run rewrote the ledger");
+    assert_eq!(fs::metadata(&f.options.ledger).unwrap().modified().unwrap(), modified);
+}
+
+#[test]
+fn a_dry_run_predicts_exactly_what_the_next_run_analyses() {
+    let f = Fixture::new("dry-predicts", false);
+    f.run(&RecordingAnalyzer::default(), Some(1));
+
+    let (report, _) = plan(&f);
+    let analyzer = RecordingAnalyzer::default();
+    f.run(&analyzer, None);
+    assert_eq!(analyzer.seen.lock().unwrap().len(), report.outstanding);
+}
+
+// --- The restart guard -----------------------------------------------------
+//
+// A run that would not resume, while earlier work exists (analysed tracks in
+// the backup, or a discarded resume file with finished tracks in it), redoes
+// hours of work. The guard is the same `dry_run` both front ends use.
+
+/// A backup with no earlier analysis at all: a first-ever run.
+fn first_run_backup_json() -> String {
+    json!({
+        "_app": "VinylCollectionPlayer", "_version": 2,
+        "collection": {"releases": [], "tracklist": [], "videos": [video("1_aaa"), video("1_bbb")]},
+        "track_meta": []
+    })
+    .to_string()
+}
+
+#[test]
+fn a_fresh_start_over_an_analysed_backup_redoes_work() {
+    let f = dry_fixture("guard-fresh");
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::FreshStart);
+    assert_eq!(report.discarded_completed, 0);
+    assert!(report.restart_redoes_work());
+    let msg = report.restart_message();
+    assert!(msg.contains("No resume file"), "{msg}");
+    assert!(msg.contains("1 analysed"), "names the analysed count: {msg}");
+}
+
+#[test]
+fn a_discarded_ledger_with_finished_tracks_redoes_work() {
+    let f = Fixture::new("guard-discarded", false);
+    fs::write(f.dir.join("backup.json"), first_run_backup_json()).unwrap();
+    let mut ledger = Ledger::new(settings_hash_for("Never"), "2026-09-04T12:00:00Z");
+    ledger.record_success("1_aaa", some_result(), "2026-09-04T12:00:00Z");
+    fs::write(&f.options.ledger, ledger.to_json().unwrap()).unwrap();
+
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::DiscardedSettingsChanged);
+    assert_eq!(report.analysed_in_backup, 0);
+    assert_eq!(report.discarded_completed, 1);
+    assert!(report.restart_redoes_work());
+    let msg = report.restart_message();
+    assert!(msg.contains("1 finished"), "{msg}");
+    assert!(msg.contains("cross-check"), "names the setting that changed: {msg}");
+}
+
+#[test]
+fn an_unreadable_ledger_counts_nothing_discarded() {
+    let f = Fixture::new("guard-junk", false);
+    fs::write(f.dir.join("backup.json"), first_run_backup_json()).unwrap();
+    fs::write(&f.options.ledger, "{ not json").unwrap();
+    let (report, _) = plan(&f);
+    assert_eq!(report.discarded_completed, 0);
+    assert!(!report.restart_redoes_work(), "nothing finished is known to be lost");
+}
+
+#[test]
+fn resuming_and_first_ever_runs_are_not_guarded() {
+    let f = dry_fixture("guard-resume");
+    write_ledger(&f.options.ledger, "Always");
+    let (report, _) = plan(&f);
+    assert!(matches!(report.resume, ResumeOutcome::Resumed { .. }));
+    assert!(!report.restart_redoes_work());
+
+    let f = Fixture::new("guard-first", false);
+    fs::write(f.dir.join("backup.json"), first_run_backup_json()).unwrap();
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::FreshStart);
+    assert!(!report.restart_redoes_work());
+}
+
+#[test]
+fn a_run_with_nothing_outstanding_redoes_nothing() {
+    // Earlier analysis in the backup, no resume file — but the only video is
+    // held back for review, so a run has nothing to analyse and redoes nothing.
+    let f = Fixture::new("guard-nothing-to-do", false);
+    let backup = json!({
+        "_app": "VinylCollectionPlayer", "_version": 2,
+        "collection": {"releases": [], "tracklist": [], "videos": [long_video("1_mix")]},
+        "track_meta": [
+            {"id": "1_mix", "bpm": 124.0, "key": "8A",
+             "bpm_source": "analysis", "key_source": "analysis"}
+        ]
+    });
+    fs::write(f.dir.join("backup.json"), backup.to_string()).unwrap();
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::FreshStart);
+    assert_eq!(report.analysed_in_backup, 1);
+    assert_eq!(report.outstanding, 0);
+    assert!(!report.restart_redoes_work(), "nothing to analyse, so nothing is redone");
+}
+
+#[test]
+fn the_ui_resume_hint_points_at_import_not_at_an_output_name() {
+    let f = dry_fixture("resume-hint-ui");
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume, ResumeOutcome::FreshStart);
+
+    let cli = report.resume_message_for(Frontend::Cli);
+    assert_eq!(cli, report.resume_message(), "the CLI wording is the default");
+    assert!(cli.contains("same output name"), "{cli}");
+
+    let ui = report.resume_message_for(Frontend::Ui);
+    assert!(ui.contains("Import earlier progress"), "{ui}");
+    assert!(ui.contains(".ledger.json"), "{ui}");
+    assert!(!ui.contains("output name"), "CLI-only advice in the UI: {ui}");
+    assert!(ui.contains("1 analysed"), "keeps the count: {ui}");
+
+    // Nothing else changes per front end.
+    let f = dry_fixture("resume-hint-ui-resumed");
+    write_ledger(&f.options.ledger, "Always");
+    let (report, _) = plan(&f);
+    assert_eq!(report.resume_message_for(Frontend::Ui), report.resume_message_for(Frontend::Cli));
+}
+
+/// Run the built binary with `args`, from inside `dir`.
+fn cli(dir: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_discogs-analyzer"))
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("the binary runs")
+}
+
+#[test]
+fn the_cli_refuses_to_redo_work_without_fresh_and_writes_nothing() {
+    let f = dry_fixture("cli-guard");
+    let d = |n: &str| f.dir.join(n).display().to_string();
+    // A yt-dlp that does not exist: the guard must fire before it is looked for.
+    let out = cli(
+        &f.dir.0,
+        &["backup.json", "-o", &d("analysis.json"), "--work-dir", &d("work"), "--yt-dlp", &d("no-yt-dlp")],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "should exit non-zero: {stderr}");
+    assert!(stderr.contains("--fresh"), "{stderr}");
+    assert!(stderr.contains("--plan"), "{stderr}");
+    assert!(!stderr.contains("no yt-dlp"), "the guard ran after yt-dlp resolution: {stderr}");
+    assert!(!f.dir.join("analysis.json").exists(), "wrote an export");
+    assert!(!f.dir.join("analysis.ledger.json").exists(), "wrote a ledger");
+    assert!(!f.dir.join("work").exists(), "created the work dir");
+
+    // With --fresh it gets past the guard, to the (missing) yt-dlp.
+    let out = cli(
+        &f.dir.0,
+        &["backup.json", "-o", &d("analysis.json"), "--work-dir", &d("work"), "--yt-dlp", &d("no-yt-dlp"), "--fresh"],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no yt-dlp"), "--fresh should pass the guard: {stderr}");
+}
+
+#[test]
+fn the_cli_does_not_guard_a_first_ever_run() {
+    let f = Fixture::new("cli-first", false);
+    fs::write(f.dir.join("backup.json"), first_run_backup_json()).unwrap();
+    let d = |n: &str| f.dir.join(n).display().to_string();
+    let out = cli(
+        &f.dir.0,
+        &["backup.json", "-o", &d("analysis.json"), "--work-dir", &d("work"), "--yt-dlp", &d("no-yt-dlp")],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("no yt-dlp"), "a first run is not refused: {stderr}");
+}
+
+#[test]
+fn fresh_is_documented_in_help() {
+    let out = cli(Path::new("."), &["--help"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("--fresh"));
+}

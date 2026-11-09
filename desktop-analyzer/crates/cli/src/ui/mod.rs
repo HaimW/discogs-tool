@@ -19,6 +19,10 @@ mod http;
 mod oracle;
 mod origin;
 mod state;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
 
 use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 use std::sync::Arc;
@@ -30,6 +34,9 @@ const PAGE: &str = include_str!("page.html");
 
 /// Serve the UI until the process is killed.
 pub fn serve(port: u16, open_browser: bool, allow_origins: Vec<String>) -> Result<(), String> {
+    // Resolved once, up front: a server that could not say where it keeps
+    // files would fail at the first upload instead of at startup.
+    let data_dir = crate::datadir::data_dir()?;
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     let listener = TcpListener::bind(addr)
         .map_err(|e| format!("could not listen on {addr}: {e}"))?;
@@ -38,6 +45,11 @@ pub fn serve(port: u16, open_browser: bool, allow_origins: Vec<String>) -> Resul
     let url = format!("http://{bound}");
 
     println!("Analyzer UI on {url}");
+    println!(
+        "Data folder: {} (set {} to use another)",
+        data_dir.display(),
+        crate::datadir::OVERRIDE_VAR
+    );
     if allow_origins.is_empty() {
         println!(
             "Only this page may drive the analyzer. To use the web app's Analyzer tab,\n\
@@ -51,8 +63,16 @@ pub fn serve(port: u16, open_browser: bool, allow_origins: Vec<String>) -> Resul
         try_open(&url);
     }
 
-    let state = Arc::new(UiState::default());
+    let state = Arc::new(UiState::new(data_dir));
     let allowed = Arc::new(origin::Allowed::new(bound.port(), allow_origins));
+    serve_on(listener, state, allowed);
+    Ok(())
+}
+
+/// Accept connections on `listener` until it fails. Split from `serve` so
+/// tests can run the real server on a port of their own with a state of
+/// their own.
+pub(crate) fn serve_on(listener: TcpListener, state: Arc<UiState>, allowed: Arc<origin::Allowed>) {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -65,7 +85,6 @@ pub fn serve(port: u16, open_browser: bool, allow_origins: Vec<String>) -> Resul
             Err(e) => eprintln!("connection failed: {e}"),
         }
     }
-    Ok(())
 }
 
 /// Ask the desktop to open the page. Best effort: if it fails the URL is

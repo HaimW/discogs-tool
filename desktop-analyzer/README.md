@@ -52,12 +52,23 @@ About fifteen minutes the first time, mostly waiting for the build.
 
 5. **Analyse your collection:**
    - In the web app, go to **Backup** and download a fresh backup.
-   - In the analyzer page, give it that file. A Windows path such as
-     `C:\Users\you\Downloads\backup.json` works as-is.
-   - Try **Dry run** first, then **Start**. A large collection takes a while;
-     you can stop and start again and it carries on where it left off.
-   - Back in the web app, **Restore from backup** with the file the analyzer
-     wrote.
+   - In the analyzer page, **choose that backup file** with the file picker.
+     The page says how many videos it found; the analyzer keeps its own copy
+     in its data folder (below), so you only choose it again when you have a
+     newer backup.
+   - Try **Dry run** first, then **Start**. The dry run counts only the work
+     a run would actually do: tracks already finished in the resume file are
+     shown as "already analysed", not "to analyse", and it warns when there is
+     no resume file, or when the one there would be thrown away. A large
+     collection takes a while; you can stop and start again and it carries on
+     where it left off.
+   - If a run would redo finished work — the backup already holds analysed
+     tracks but there is no resume file, or the resume file would be
+     discarded because the **Cross-check** setting changed — **Start** asks
+     first. You can **Import earlier progress** (the `.ledger.json` file an
+     earlier run wrote), start from scratch, or cancel.
+   - When it finishes, click **Download result** and, back in the web app,
+     **Restore from backup** with that file.
 
 Next time, only steps 3–5: open Ubuntu, `cd discogs-tool/desktop-analyzer`,
 start it, open the page.
@@ -107,6 +118,74 @@ Serves a page on <http://127.0.0.1:8733> with every option below as a control,
 and tries to open it in your browser. The page only works while the command is
 running.
 
+### Where the UI keeps its files
+
+A browser hands the analyzer a file's contents, not its location, so the UI
+keeps everything in a data folder of its own, under fixed names:
+
+| File | What it is |
+|---|---|
+| `backup.json` | The backup you chose last. Replaced when you choose another. |
+| `analysis.json` | The result — what **Download result** gives you. |
+| `analysis.ledger.json` | The resume file. Because the name never changes, every run resumes the last one automatically. |
+| `audio/` | Downloaded audio, only when **Keep the downloaded audio** is on (see below). |
+
+The folder is:
+
+| System | Location |
+|---|---|
+| Linux / WSL | `$XDG_DATA_HOME/discogs-analyzer`, or `~/.local/share/discogs-analyzer` |
+| macOS | `~/Library/Application Support/discogs-analyzer` |
+| Windows | `%APPDATA%\discogs-analyzer` |
+
+Set `DISCOGS_ANALYZER_DATA` to use another folder — for a second collection,
+say. The folder is printed when the UI starts and shown under **Advanced**,
+and is only created when something is first saved into it. Audio that is not
+kept goes to a separate scratch folder (temporary by default; set it under
+**Advanced**) and is deleted as soon as each track is analysed.
+
+### Keeping the downloaded audio
+
+**Keep the downloaded audio** is off by default. Turn it on and each track's
+audio is saved in the data folder's `audio/` folder instead of being deleted
+(the **Advanced** scratch folder is then not used). The next run reuses it:
+those tracks are not downloaded again, so a rerun — after changing
+**Cross-check**, say — makes no YouTube requests for them and hits no rate
+limits or bot checks.
+
+The cost is disk space: a few MB per track, so roughly 10-20 GB for a
+collection of a few thousand. The page shows how much is saved, and **Delete
+saved audio** empties the `audio/` folder (after asking). It deletes only what
+is inside `audio/` — a link in there is removed, not what it points to, and
+nothing else in the data folder is touched — and is refused while a run is
+going. Results and resume files are unaffected; the audio is simply
+downloaded again if a later run needs it.
+
+### Bringing earlier progress in
+
+**Import earlier progress** (under **Advanced**, and offered whenever a run
+would start from scratch) installs a resume file from an earlier run — for
+example a `mine.ledger.json` written by the terminal version. The page says
+how many tracks are finished in it and whether it matches the current
+**Cross-check** setting; if it does not, it tells you which setting resumes
+it. Replacing a resume file that already holds finished tracks asks first and
+shows both counts. Nothing can be uploaded or imported while a run is going.
+
+### Restart confirmation
+
+**Start** refuses to begin a run that would redo finished work unless you
+confirm it: when there is no resume file but the backup already holds analysed
+tracks, or when the resume file would be discarded with finished tracks in it
+(usually because **Cross-check** differs from the run that wrote it). A
+first-ever run, a run that resumes, and a run with nothing left to analyse
+start straight away.
+
+> **The web app's Analyzer tab is out of date.** Driven through
+> `--allow-origin`, it still sends typed file paths, which this version
+> ignores: it has no way to upload a backup (so it gets "Choose a backup file
+> first") and cannot confirm a restart. Until the web app is updated, use the
+> analyzer's own page, or the terminal version.
+
 | Flag | Meaning |
 |---|---|
 | `--ui-port N` | Use another port. `0` picks any free one. |
@@ -118,8 +197,8 @@ running.
 Export a backup from the web app, then:
 
 ```sh
-# 1. See what would happen. Downloads nothing.
-discogs-analyzer backup.json --plan
+# 1. See what would happen. Downloads nothing, writes nothing.
+discogs-analyzer backup.json --plan -o analysis.json
 
 # 2. Do it.
 discogs-analyzer backup.json -o analysis.json
@@ -134,7 +213,8 @@ sensible before committing to a run that can take hours.
 
 | Flag | Meaning |
 |---|---|
-| `--plan` | Print what would be analysed, skipped and flagged; download nothing. |
+| `--plan` | Print what a run with the same options would do, and download or write nothing. It reads the resume file, so "to analyse" is only the remaining work; it also shows what is already analysed, what failed too often to be retried (raise `--max-attempts`), and whether the resume file would be resumed, is missing, or would be discarded. Pass the same `-o`/`--ledger`/`--second-opinion` as the run. |
+| `--fresh` | Start from scratch even though earlier work exists. Without it, a run that would not resume refuses to start — and writes nothing — when the backup already holds analysed tracks or the resume file would be discarded with finished tracks in it. Check with `--plan`; to resume instead, pass the earlier run's `-o`/`--ledger`/`--second-opinion`. A first-ever run never needs it. |
 | `-o, --output` | Where to write the result. Default `analysis.json`. |
 | `--force` | Re-analyse tracks whose BPM/key you set or verified yourself. |
 | `--limit N` | Stop after N tracks; the rest stay queued for the next run. |
@@ -201,6 +281,12 @@ either.
 The ledger is discarded and the run starts over if the analysis algorithm has
 changed since it was written, because mixing tempos from two different detectors
 is worse than redoing the work.
+
+The ledger's name follows the output (`-o mine.json` resumes from
+`mine.ledger.json`), so a rerun with a different output name or second-opinion
+setting would start from scratch. When that would redo finished work the run
+refuses unless you pass `--fresh`; `--plan` (or **Dry run**) tells you which
+before you commit hours to it.
 
 ### What it will not touch
 

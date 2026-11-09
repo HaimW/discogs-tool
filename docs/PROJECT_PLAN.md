@@ -28,7 +28,7 @@ These are not features — they are prerequisites for a paid product.
 
 - [ ] **B1 — Discogs API commercial consent.** The Discogs API is free for *non-commercial* use. Charging requires written consent from Discogs; their image-licensing terms are also strict about cover art. Contact Discogs early — this is the biggest legal blocker.
 - [ ] **B2 — YouTube ToS compliance.** Player iframes are still parked off-screen at 1×1 px (`index.html:70-71`, checked 2026-11-06). YouTube requires a visible player ≥ 200×200. Fix: show a small real player in the now-playing bar.
-- [ ] **B3 — Backend.** No server today → nothing to gate payment with, nowhere to keep an AI API key secret, no cloud sync. Plan: thin backend (Cloudflare Workers + D1/KV, or Supabase) for auth, license keys (Stripe / LemonSqueezy), sync, and AI proxying.
+- [ ] **B3 — Backend.** No server today → nothing to gate payment with, nowhere to keep an AI API key secret, no cloud sync. Plan: thin backend (Cloudflare Workers + D1/KV, or Supabase) for auth, license keys (Stripe / LemonSqueezy), sync, and AI proxying. *2026-11-09: proposal written — Supabase for accounts and sync, site stays on GitHub Pages; see §2b.*
 
 ---
 
@@ -198,12 +198,70 @@ These are not features — they are prerequisites for a paid product.
 ## 2. Professionalization (the unglamorous 80%)
 
 - [x] **P1 — Fix C1–H3 first.** With a Discogs token in IndexedDB, XSS is account takeover; can't charge money on top of that. *Done: C1 and H1–H4 fixed (2026-06-12, 2026-10-13).*
-- [ ] **P2 — Accounts + cloud sync.** "Your data lives only in this browser" is the #1 commercial weakness; flip it into the #1 paid feature ("synced across devices, never lose crate data"). IndexedDB stays as offline cache; sync to backend.
+- [ ] **P2 — Accounts + cloud sync.** "Your data lives only in this browser" is the #1 commercial weakness; flip it into the #1 paid feature ("synced across devices, never lose crate data"). IndexedDB stays as offline cache; sync to backend. *2026-11-09: detailed proposal in §2b (Supabase, authored data only, per-field merge, phases).*
 - [~] **P3 — Engineering hygiene.** ES modules instead of global-scope script soup; TypeScript (or JSDoc + `tsc --checkJs`); ESLint; Playwright smoke tests; GitHub Actions CI. *2026-11-06: tooling in place — `package.json` (`npm test`, `npm run lint`, `npm run check`), ESLint 10 with a config that collects every file's top-level globals so `no-undef` still catches typos across the shared scope (lint is clean), and `.github/workflows/web-app.yml` running lint + tests on every push and PR. 213 unit tests in 17 files (2026-11-06, after the `harmonic.js`/`store_serial.js` tests, P6, F16, F17 and F18). Playwright smoke tests committed the same day: now 42 tests in `tests/e2e/` (click through every nav view, setup token check, toasts, lazy background video, loading/empty/error states, volume, the queue panel and reordering it, the setlist table), run with `npm run test:e2e` against a local static server with every request blocked except a faked `api.discogs.com`; `@playwright/test` pinned at 1.62.1; a CI `e2e` job runs them beside lint + unit tests. Still to do: ES modules and type checking — **deferred 2026-11-06** (see §5a).*
 - [x] **P4 — Event delegation.** Replace all inline `onclick="..."` string building with `data-*` attributes + delegated listeners (also resolves C1 permanently). *Done 2026-11-06: all 140 inline handlers replaced. `act(type, fnName, args)` (`src/actions.js`) renders `data-on-<type>` + JSON `data-args-<type>`; one listener per event type on `document` (click, change, input, Enter, Escape) calls the function, innermost first, bubbling like inline handlers did. `escJs()` is no longer used. `tests/actions.test.js` fails if an inline handler returns or an action names a missing function; a browser run clicked through every view with no errors.*
 - [ ] **P5 — PWA.** Manifest + service worker → installable, offline crate browsing at record fairs; pairs perfectly with the store/serial feature. *No manifest or service worker yet.*
 - [x] **P6 — UX polish.** Proper toast system instead of `alert()` and sync-banner reuse; loading/empty states; error boundaries. *2026-11-06: toasts done (`src/toast.js`; 11 of 12 `alert()`s and all 6 one-off sync-banner notices replaced — the one left is the forced reload after another tab's DB upgrade, where a blocking message is the point). Setup token check and lazy background video done (§5b).* *2026-11-06 (later): loading/empty states and error boundaries done. Every view now goes through one wrapper (`src/view_state.js`, used by `renderCurrentView`): "Loading …" only after 250 ms (no flash), `aria-busy` + a `role=status` line, no spinning with reduced motion; a refresh keeps the page dimmed instead of blanking it. Render tokens stop a slow older render from overwriting a newer one. A view that throws or rejects is logged and replaced by a message with Try again. A database that will not open (no IndexedDB, private mode, VersionError, quota) says why instead of a blank page; a blocked upgrade waits with a notice; `openDB` now shares one open request. Empty states checked across all views; fixed the ones that were wrong or had no next step (Tracks on a fresh install, BPM/key filter with no metadata, Store before the first sync, empty setlist, alerts panel). 25 unit (`tests/view_state.test.js`) + 6 e2e (`tests/e2e/states.spec.js`) tests. Re-renders that skip the router (filter clicks, sync and poll refreshes) get no loading delay but share the same guard: they draw only while still the newest render on their own page, and a failure there also ends on the error screen.*
 - [ ] **P7 — Landing page + demo mode.** Pricing page, docs, and a demo collection so prospects can try without a Discogs token.
+
+---
+
+## 2b. Proposal: cloud sync on Supabase (P2 + the first part of B3)
+
+**Status: proposal, 2026-11-09 — not approved, not started.** Written so the
+decision can be made later. It reverses §5's "stays serverless" rule for this
+one feature, and it is the first step on the paid-product path, so it waits
+on the open priority question (paid path vs. more no-server features).
+
+### The problem
+The site already works on a phone: enter the Discogs token, sync, and the
+collection appears. What does not follow you is everything made on the PC —
+analyzer BPM/key, ratings, tags, setlists, store items, price alerts, price
+history. It lives in that one browser's IndexedDB. Today's workaround is
+manual: Backup on the PC, Restore on the phone.
+
+### Recommendation
+**Supabase** (hosted Postgres + sign-in + row-level security) for accounts
+and sync; **the site stays on GitHub Pages** and talks to Supabase directly
+from the browser. No server code of our own for this part.
+
+| Option | Verdict |
+|---|---|
+| Backup/Restore by hand | Works today; a copy, not sync. Keep as the fallback. |
+| User's own Google Drive file | Stays serverless, but merging is crude and it is a dead end for a paid product. |
+| **Supabase** | Least code: sign-in, per-user access rules and the database come built in; free tier fits (one user's data is ~1.5 MB). Already named in B3. |
+| Vercel functions + marketplace Postgres | Fine, but we would write sign-in and the API ourselves. Better kept for the secret-holding parts later (below). |
+| Cloudflare Workers + D1 | Same trade-off as Vercel; also named in B3. |
+
+### What syncs
+Only **authored** data — what the user made and Discogs cannot return. The
+backup v3 labels already draw the line:
+- **Syncs:** `track_meta` (~1.3 MB for 3,600 tracks — analyzer results, BPM/key, ratings, energy, tags, notes, shelf), setlists, store items and batches, price history, notifications, want alerts, chosen settings, and the `video_overrides` (stored on releases today, so they must be pulled out into their own synced records).
+- **Does not sync:** the collection, tracklists, wants and marketplace stats — each device fetches those from Discogs again. The **Discogs token** never goes to the cloud; it is entered once per device (or replaced by Discogs sign-in, below).
+
+### How it works
+- **Local-first.** IndexedDB stays the app's database and works offline. Every change to a synced record gets an `updated_at` and a device id and is queued; the queue is pushed when online, and changes from other devices are pulled on start, on focus and every few minutes (or live via Supabase Realtime).
+- **Conflicts:** last writer wins **per field**, not per record, so a rating set on the phone and a BPM corrected on the PC both survive. Deletes are kept as markers ("tombstones") so a deleted setlist doesn't come back from another device.
+- **IDs:** setlists, store batches and notifications number themselves 1, 2, 3 per device today (IndexedDB auto-increment), so two devices would both create "setlist 5". They must move to unique IDs (UUIDs) first, with a one-time migration of existing records.
+- **Tables:** one per synced store, each row carrying `user_id`, the record id, the record as JSON, `updated_at`, `deleted`. Row-level security: a user can read and write only rows with their own `user_id`.
+- **First sign-in on a device that already has data:** upload it (first device), or merge it with what is in the cloud — never silently overwrite.
+- **Sign-in:** email magic link to start (no passwords to store); Google later if wanted.
+
+### Phases
+1. **Prerequisites (no backend):** unique IDs for auto-increment stores, `updated_at`/device id on every write to a synced store, pull `video_overrides` into their own store; the phone layout (L11 and a phone pass over every view).
+2. **Accounts + one-way backup to the cloud** (Supabase project, tables, row-level security, sign-in UI). Already useful: "never lose your data".
+3. **Two-way sync** with the queue, per-field merge, tombstones, and a sync status indicator.
+4. **Paid-product pieces that need a place for secrets:** Stripe/LemonSqueezy webhooks and license checks, Discogs OAuth sign-in instead of pasted tokens (the consumer secret cannot live in the browser), AI proxy (F1–F4), Last.fm signing (F12), email digests (F14). These go in Supabase Edge Functions or Vercel functions — decide then.
+
+**Effort:** phases 1–3 roughly one to two weeks of agent work; phase 1
+alone is small to medium and useful on its own.
+
+### Risks and open questions
+- Cost: free tier is enough for personal use and early users; paid tier once there are many users or heavy Realtime use.
+- Privacy: collection notes and prices leave the device for the first time — needs a privacy note and an account-delete button that really deletes.
+- Tests: sync logic gets unit tests for merge/tombstones and a browser test with two browser contexts against a local Supabase (`supabase start`) or a fake.
+- Supabase project ownership and keys: only the public "anon" key goes in the site; row-level security is what protects the data, so its policies get their own review.
 
 ---
 
@@ -273,8 +331,53 @@ workflow that builds Linux and macOS binaries on an `analyzer-v*` tag
 - [ ] Listen to the three high-confidence tracks the oracle disputes (`3sgtB4uusJQ`, `mLTzwrK1VyE`, `-ZonmQZG0GQ`).
 - [ ] Multi-profile key cross-checking (designed; blocked on trustworthy ground truth).
 - [ ] Prefer autocorrelation on disputed tracks (needs a second reference or 15–20 tracks checked by ear).
-- [-] Tauri shell, yt-dlp sidecar bundling, macOS signing — deferred by choice; only needed to hand the tool to someone else.
+- [-] Tauri shell, yt-dlp sidecar bundling, macOS signing — deferred by choice; only needed to hand the tool to someone else. *2026-11-09: handing it to friends is now planned — see "Portable analyzer" below, which replaces the Tauri shell with a plain double-click binary.*
 - [ ] Read backup v3 from its `authored`/`derived` paths as well as the v2 ones (`collection.*`, top-level `track_meta`). *Added 2026-11-06: v3 keeps those two at their v2 paths only because the analyzer reads them there; once it reads both, a v4 can complete the clean split (§5c).*
+- [x] Dry run counts only the remaining work. *Done 2026-11-09: `--plan` and the UI's Dry run read the same resume file, settings hash and retry budget as a real run, and report "to analyse" (outstanding), already analysed, failed too often, already yours and held for review. They warn when no resume file is found at the chosen output name (with a hint when the backup already holds analysed tracks) or when an existing one would be discarded. Read-only. Tested in `crates/cli/tests/end_to_end.rs`, `main.rs` and `ui/state.rs`.*
+- [ ] `FileLedgerStore::load` treats any read error (e.g. permission denied) as "no ledger", so a run starts fresh and overwrites it. Found in the 2026-11-09 review; existed before.
+- [ ] README documents a `--tempo-min` flag the CLI no longer has.
+- [x] Pick files instead of typing paths. *Done 2026-11-09: the analyzer page has "Choose backup file" (uploaded, validated, max 64 MiB), "Download result" and "Import earlier progress" (validates a `.ledger.json`, says which Cross-check setting resumes it, refuses to replace finished progress without confirmation). The UI keeps `backup.json`, `analysis.json`, `analysis.ledger.json` and `audio/` in its own data folder (`DISCOGS_ANALYZER_DATA`, else the per-OS app-data folder), so the output name no longer decides which progress is used. The oracle uses the uploaded backup. Keep audio is off by default, explained beside the checkbox; when on, audio goes to `audio/`, with its size shown and a "Delete saved audio" button. CLI path flags unchanged. Not yet tried in a real browser. **Breaks the web app's Analyzer tab** (`src/views/analyzer.js` still sends typed paths) — see next item.*
+- [x] Warn before a full restart. *Done 2026-11-09: when a run would not resume and would redo analysed tracks or throw away finished progress, the page shows a dialog (Import earlier progress / Start from scratch / Cancel) and the server refuses `/api/run` with 409 `restart_needs_confirmation` unless confirmed; the CLI refuses unless `--fresh` is passed, writing nothing. Same check for both.*
+- [x] Update the web app's Analyzer tab (`src/views/analyzer.js`) to upload the backup, download the result and confirm a restart, matching the new analyzer API. Only affects an `http` copy of the app run with `--allow-origin`; the live `https` site cannot reach the analyzer today anyway. Fits the portable-analyzer work. *Done 2026-11-09: "Send my collection" uploads the same export as the Backup page (shared `buildFullBackup()` in `src/backup.js`), then dry-runs; Start asks in a dialog on 409 and resends with `confirm_restart`; Import earlier progress, keep-audio with saved-audio size and delete, Download result, and "Load results into the app" through the same code as Restore (shared `restoreParsedBackup()`). The https instructions now describe the analyzer page's file-picker flow. Tests: `tests/analyzer.test.js`, `tests/backup.test.js`, `tests/e2e/analyzer.spec.js` (fake analyzer with the real origin/CORS rules). Not tried against a real analyzer in a browser.*
+
+#### Portable analyzer for friends (planned 2026-11-09, not started)
+
+Goal: a friend opens the Discogs tool website and gets the analyzer working in
+a few clicks — no repo, no terminal, no WSL. Their flow: **Analyzer** tab →
+**Download for Mac/Windows** → unzip and double-click → back in the tab it
+shows "Connected" → **Start**. The collection goes from the website to the
+analyzer and the results come straight back (no backup file, no paths, no
+Restore step). Two versions: **macOS first**, then Windows.
+
+Today: the release workflow builds Linux and macOS (arm64) on an
+`analyzer-v*` tag, but no analyzer release has ever been published, so the
+website's Download button leads nowhere useful. There is no Windows build.
+
+Shared groundwork (needed by both):
+- [ ] **Connection test first (spike, ~1 h).** Can the live `https` site reach `http://127.0.0.1:8733`? Believed to work in current Chrome/Edge after a one-time "local network access" prompt, and in Firefox (localhost counts as secure); Safari is expected to refuse. Not verified — the web app's Analyzer tab currently says it is impossible. Decides between the connected flow and the file-picker fallback.
+- [ ] **Starts on double-click.** With no arguments it serves its page, allows the live site's origin by default (no `--ui` / `--allow-origin`), and opens the browser.
+- [ ] **Fetches yt-dlp itself** on first start into its own folder, and updates it when old; carries on with the old copy when offline.
+- [ ] **JavaScript runtime for yt-dlp.** YouTube now needs one (deno/node/bun); the analyzer uses one only if installed. Find out what happens without it and bundle or fetch one if needed.
+- [ ] **Website drives the run.** The Analyzer tab sends the collection from the browser's database, shows progress, and saves results as estimates (same rules as Restore); shows the Download button for the visitor's OS.
+- [ ] **Fallback page.** If the browser blocks the connection: the analyzer's own page gets "Choose backup file" and "Download result" buttons, so it is still clicks only.
+- [ ] **Version shown on the page**, and a banner when the binary on disk is newer than the running one.
+
+macOS (first):
+- [ ] Build a universal (arm64 + x86_64) binary in the release workflow, packaged so it opens with a double-click (a `.app` or a `.command`).
+- [ ] Decide on signing: unsigned shows a Gatekeeper block (right-click → Open); notarization needs the ~$99/yr Apple developer account.
+- [ ] Test on a Mac that has never had the tool: download from the website, open, connect, analyse a few tracks, results land in the web app.
+- [ ] Publish the first `analyzer-v1.0.0` release.
+
+Windows (second):
+- [ ] Windows job in the release workflow building FFTW, libkeyfinder and the analyzer as one `.exe` (biggest risk: the native libraries are built by a bash script today).
+- [ ] Use the Windows `yt-dlp.exe`; check whether `--cookies-from-browser` works natively (it failed only under WSL, but newer Chrome cookie encryption may still block it).
+- [ ] SmartScreen warning: accept "More info → Run anyway", or buy a code-signing certificate.
+- [ ] Test on a clean Windows PC the same way as the Mac.
+
+Risks to keep in view: YouTube bot checks after many downloads (today's
+workaround, a cookies file, is too hard for a friend); handing out a
+YouTube-downloading tool from the site is the B2 blocker if this is ever
+charged for.
 
 - **Stack:** pure Rust, no Python. Tauri shell (small binary, no bundled
   Chromium) + native Rust analysis, faster startup and no PyInstaller
@@ -447,6 +550,10 @@ Shipped work that no plan item asked for (found in the 2026-11-06 audit):
 ---
 
 ## Decisions log
+
+- **2026-11-09 (later):** cloud sync proposal written (§2b): Supabase for accounts and sync of authored data only, the site stays on GitHub Pages, secret-holding pieces (payments, Discogs OAuth, AI) later in Edge/Vercel functions. Not approved yet — waits on the paid-path priority question. The desktop analyzer's UI now takes files instead of typed paths, keeps its progress in its own data folder, and asks before a full restart.
+
+- **2026-11-09:** the analyzer will be made portable for friends (§3b "Portable analyzer"): a double-click binary downloaded from the website, driven from the website's Analyzer tab, macOS first and Windows second. Replaces the WSL launcher idea, which still needed the repo on the PC. Scheduled for later, not started. The dry run now counts only remaining work, using the same resume file as a real run.
 
 - **2026-11-06 (later):** setlists keep the full key chip on wide screens and BPM to one decimal (the queue rounds); moves that would change the two tracks of a running crossfade are refused; the setlist CSV gains an energy column and takes the key from the musical name when no code is stored.
 - **2026-11-06:** store serials split joint countries on "&" too ("UK & Europe" → `EU-UK`; future serials only). Harmonic suggestions normalise keys on both sides with `camelotCode()`, so hand-typed "8a", "08A", "Am" now match. The L8 tempo curve is kept as fixed. In the queue, estimated BPM/key stay dimmed/dashed and the BPM/key column appears only once some queued track has data. ES modules deferred (see §5a).

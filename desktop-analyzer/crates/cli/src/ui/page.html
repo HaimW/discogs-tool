@@ -68,6 +68,30 @@
   .banner.err { background: rgba(216,80,59,0.10); border: 1px solid var(--bad); }
   .planline { font: 12px var(--mono); color: var(--muted); margin-top: 10px; }
   .planline b { color: var(--accent); }
+  input[type=file] { font-size: 13px; color: var(--muted); max-width: 100%; }
+  a.btn {
+    display: inline-block; text-decoration: none; background: transparent; color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px; padding: 10px 18px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  a.btn:hover:not([aria-disabled=true]) { border-color: var(--accent); }
+  a.btn[aria-disabled=true] { opacity: 0.4; cursor: not-allowed; }
+  button:focus-visible, a.btn:focus-visible, input[type=file]:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  .status { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .status.err { color: var(--bad); }
+  .resumeimport { margin: -4px 0 12px; }
+  dialog {
+    background: var(--card); color: var(--text); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px; margin: auto;
+    width: calc(100% - 40px); max-width: 520px;
+  }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
+  dialog h2 { font-size: 16px; margin-bottom: 12px; }
+  dialog p { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+  dialog p.lead { color: var(--text); }
+  dialog .actions { justify-content: flex-end; margin-top: 18px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -82,18 +106,20 @@
   <div class="card">
     <h2>Files</h2>
     <div class="field">
-      <label for="backup">Backup file</label>
-      <input type="text" id="backup" placeholder="/path/to/vinyl-backup-2026-09-06.json">
-      <p class="hint">The JSON you downloaded from Backup &amp; Restore. Export a fresh one — records are written whole, so an old export can undo newer edits. Windows paths (<code>C:\Users\…</code>) work here too.</p>
-    </div>
-    <div class="field">
-      <label for="output">Write the result to</label>
-      <input type="text" id="output" value="analysis.json">
+      <label for="backupFile">Choose backup file</label>
+      <input type="file" id="backupFile" accept=".json,application/json" aria-describedby="backupHint backupStatus">
+      <p class="hint" id="backupHint">The JSON you downloaded from Backup &amp; Restore. Export a fresh one — records are written whole, so an old export can undo newer edits. A copy is kept in the analyzer's data folder, next to the result.</p>
+      <p class="status" id="backupStatus" role="status" aria-live="polite"></p>
     </div>
     <div class="actions">
       <button class="ghost" id="planBtn">Dry run</button>
       <span class="planline" id="planline"></span>
     </div>
+    <p class="hint" id="resumeline" hidden></p>
+    <div class="resumeimport" id="resumeImportWrap" hidden>
+      <button class="ghost" id="resumeImportBtn" type="button">Import earlier progress</button>
+    </div>
+    <p class="status" id="importStatus" role="status" aria-live="polite"></p>
   </div>
 
   <div class="card">
@@ -121,23 +147,34 @@
       </span>
     </div>
     <div class="check">
-      <input type="checkbox" id="keep_audio">
+      <input type="checkbox" id="keep_audio" aria-describedby="keepAudioHint">
       <span>Keep the downloaded audio
-        <p class="hint">Kept in the work folder and reused next time, so a rerun
-          needs no network and cannot be rate-limited. Costs a few megabytes a
-          track.</p>
+        <p class="hint" id="keepAudioHint">Keeps the downloaded audio on this computer, in the
+          analyzer's data folder. A later run — after a detection update, say — reuses it
+          instead of downloading from YouTube again: faster, and no rate limits. A few MB a
+          track, roughly 10–20&nbsp;GB for a few thousand tracks. Off by default; for your
+          own analysis only.</p>
       </span>
     </div>
+    <div class="actions">
+      <span class="hint" id="audioStats" style="margin:0">Saved audio: …</span>
+      <button class="ghost" id="audioDelete" type="button" disabled>Delete saved audio</button>
+    </div>
+    <p class="status" id="audioStatus" role="status" aria-live="polite"></p>
   </div>
 
   <div class="card">
     <details>
       <summary>Advanced</summary>
-      <div class="row">
-        <div class="field">
-          <label for="ledger">Resume file</label>
-          <input type="text" id="ledger" placeholder="beside the output">
+      <p class="hint" style="margin:0 0 10px">Data folder: <span id="dataDir">…</span></p>
+      <div class="field">
+        <div class="actions">
+          <button class="ghost" id="importBtn" type="button" aria-describedby="importHint">Import earlier progress</button>
         </div>
+        <p class="hint" id="importHint">Pick an existing <code>.ledger.json</code> resume file, so a run carries on where an earlier one stopped instead of starting over.</p>
+        <input type="file" id="ledgerFile" accept=".json,application/json" aria-label="Resume file to import" hidden>
+      </div>
+      <div class="row">
         <div class="field">
           <label for="workdir">Scratch space for audio</label>
           <input type="text" id="workdir" placeholder="system temp directory">
@@ -187,6 +224,7 @@
     <div class="actions">
       <button id="runBtn">Start</button>
       <button class="stop" id="stopBtn" hidden>Stop</button>
+      <a class="btn" id="downloadBtn" href="/api/result" download="analysis.json" aria-disabled="true">Download result</a>
     </div>
     <div class="bar"><div id="bar"></div></div>
     <div class="stats">
@@ -218,6 +256,35 @@
   </div>
 </div>
 
+<dialog id="restartDialog" aria-labelledby="restartTitle" aria-describedby="restartText restartReason">
+  <h2 id="restartTitle">Start over from scratch?</h2>
+  <p class="lead" id="restartText"></p>
+  <p id="restartReason"></p>
+  <div class="actions">
+    <button class="ghost" id="restartImport" type="button">Import earlier progress</button>
+    <button class="stop" id="restartFresh" type="button">Start from scratch</button>
+    <button class="ghost" id="restartCancel" type="button" autofocus>Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="replaceDialog" aria-labelledby="replaceTitle" aria-describedby="replaceText">
+  <h2 id="replaceTitle">Replace the resume file?</h2>
+  <p class="lead" id="replaceText"></p>
+  <div class="actions">
+    <button class="stop" id="replaceConfirm" type="button">Replace it</button>
+    <button class="ghost" id="replaceCancel" type="button" autofocus>Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="audioDialog" aria-labelledby="audioTitle" aria-describedby="audioText">
+  <h2 id="audioTitle">Delete saved audio?</h2>
+  <p class="lead" id="audioText"></p>
+  <div class="actions">
+    <button class="stop" id="audioConfirm" type="button">Delete it</button>
+    <button class="ghost" id="audioCancel" type="button" autofocus>Cancel</button>
+  </div>
+</dialog>
+
 <script>
 'use strict';
 
@@ -226,9 +293,6 @@ var $ = function (id) { return document.getElementById(id); };
 function options() {
   var limit = parseInt($('limit').value, 10);
   return {
-    backup: $('backup').value.trim(),
-    output: $('output').value.trim() || 'analysis.json',
-    ledger: $('ledger').value.trim(),
     work_dir: $('workdir').value.trim(),
     yt_dlp: $('ytdlp').value.trim(),
     cookies: $('cookies').value.trim(),
@@ -243,12 +307,44 @@ function options() {
   };
 }
 
+// r.json() regardless of status: refusals such as 409 restart_needs_confirmation
+// carry a JSON body the page needs to read.
 function post(path, body) {
   return fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body || {})
-  }).then(function (r) { return r.json(); });
+  }).then(function (r) { return r.json(); })
+    .catch(function () { return { error: 'Could not reach the analyzer. Is it still running?' }; });
+}
+
+var MAX_UPLOAD = 64 * 1024 * 1024;
+var NO_BACKUP = 'Choose a backup file first.';
+
+// Sends the File itself as the body (fetch streams a Blob; it is never read
+// into a string here). Always resolves to an object: the server's JSON when it
+// sent some, otherwise a readable error.
+function upload(path, file) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: file
+  }).then(function (r) {
+    return r.text().then(function (text) {
+      var j = null;
+      try { j = JSON.parse(text); } catch (e) { j = null; }
+      if (!j || typeof j !== 'object') j = {};
+      if (!r.ok && !j.error) {
+        j.error = r.status === 413
+          ? 'That file is too large (the limit is 64 MB).'
+          : 'The analyzer refused the file (HTTP ' + r.status + ').';
+      }
+      if (r.ok && !j.ok && !j.error) j.error = 'Unexpected reply from the analyzer.';
+      return j;
+    });
+  }).catch(function () {
+    return { error: 'Could not send the file. It may be too large, or the analyzer has stopped.' };
+  });
 }
 
 function banner(message, bad) {
@@ -258,26 +354,185 @@ function banner(message, bad) {
   el.hidden = !message;
 }
 
-$('planBtn').addEventListener('click', function () {
-  var o = options();
-  if (!o.backup) { banner('Give me the path to a backup file first.', true); return; }
-  $('planline').textContent = 'checking…';
-  post('/api/plan', o).then(function (r) {
-    if (r.error) { $('planline').textContent = ''; banner(r.error, true); return; }
-    banner('');
-    $('planline').innerHTML =
-      '<b>' + r.analyze + '</b> to analyse · ' +
-      '<b>' + r.skip + '</b> already yours · ' +
-      '<b>' + r.review + '</b> held for review';
+function setStatus(id, message, bad) {
+  var el = $(id);
+  el.textContent = message || '';
+  el.className = 'status' + (bad ? ' err' : '');
+}
+
+function errorText(r) {
+  return r.code === 'no_backup' ? NO_BACKUP : r.error;
+}
+
+// ---- Files known to the analyzer's data folder --------------------------
+
+var files = null;          // last GET /api/files reply
+var loadedName = '';       // name of the backup chosen in this session
+
+function setDownload(enabled) {
+  $('downloadBtn').setAttribute('aria-disabled', enabled ? 'false' : 'true');
+}
+$('downloadBtn').addEventListener('click', function (e) {
+  if ($('downloadBtn').getAttribute('aria-disabled') === 'true') e.preventDefault();
+});
+
+function refreshFiles() {
+  return fetch('/api/files')
+    .then(function (r) { return r.json(); })
+    .then(function (f) {
+      if (!f || f.error) return;
+      files = f;
+      $('dataDir').textContent = f.data_dir || 'unknown';
+      setDownload(f.result === true);
+      if (!loadedName) {
+        setStatus('backupStatus', f.backup ? 'A backup is loaded (' + f.backup.videos + ' videos).' : '');
+      }
+    })
+    .catch(function () { /* the poller already reports a dead server */ });
+}
+
+$('backupFile').addEventListener('change', function () {
+  var input = $('backupFile');
+  var file = input.files && input.files[0];
+  if (!file) return;
+  if (file.size > MAX_UPLOAD) {
+    setStatus('backupStatus', file.name + ' is too large (the limit is 64 MB). Is it really a backup?', true);
+    input.value = '';
+    return;
+  }
+  setStatus('backupStatus', 'Loading ' + file.name + '…');
+  upload('/api/backup', file).then(function (r) {
+    if (!r.ok) {
+      setStatus('backupStatus', r.error, true);
+      input.value = '';
+      return;
+    }
+    loadedName = file.name;
+    if (files) files.backup = { videos: r.videos };
+    setStatus('backupStatus', 'Loaded ' + file.name + ': ' + r.videos + ' videos');
+    refreshFiles().then(runPlan);
   });
 });
 
+// ---- Dry run --------------------------------------------------------------
+
+function runPlan() {
+  $('planline').textContent = 'checking…';
+  post('/api/plan', options()).then(function (r) {
+    if (r.error) {
+      $('planline').textContent = '';
+      $('resumeline').hidden = true;
+      $('resumeImportWrap').hidden = true;
+      banner(errorText(r), true);
+      return;
+    }
+    banner('');
+    // Built from nodes, not innerHTML: the resume message carries a path,
+    // and nothing from outside should ever be parsed as markup.
+    var line = $('planline');
+    line.textContent = '';
+    function part(count, label, sep) {
+      var b = document.createElement('b');
+      b.textContent = String(count);
+      line.appendChild(b);
+      line.appendChild(document.createTextNode(' ' + label + (sep ? ' · ' : '')));
+    }
+    part(r.analyze, 'to analyse', true);
+    if (r.will_run < r.analyze) {
+      line.appendChild(document.createTextNode('(this run stops after ' + r.will_run + ') · '));
+    }
+    part(r.done, 'already analysed', true);
+    part(r.exhausted, r.exhausted ? 'failed too often (raise Retries per track under Advanced to retry)' : 'failed too often', true);
+    part(r.skip, 'already yours', true);
+    part(r.review, 'held for review', false);
+
+    var resume = $('resumeline');
+    var st = r.resume ? r.resume.status : '';
+    resume.textContent = r.resume ? r.resume.message : '';
+    // A first ever run with no resume file is worth a note; no resume file
+    // while the backup already holds analysed tracks, or a file that would be
+    // thrown away, means hours of work are about to be redone.
+    var firstRun = st === 'fresh' && !r.analysed_in_backup;
+    var warning = st !== 'resumed' && !firstRun;
+    resume.className = st === 'resumed' ? 'hint'
+      : firstRun ? 'banner ok' : 'banner err';
+    resume.hidden = !resume.textContent;
+    $('resumeImportWrap').hidden = !(warning && resume.textContent);
+  });
+}
+
+$('planBtn').addEventListener('click', runPlan);
+
+// ---- Dialogs --------------------------------------------------------------
+
+// Opens a native modal dialog. `actions` maps button ids to callbacks; Esc,
+// the cancel button and anything else that closes it count as Cancel. Focus
+// goes to `cancelId` first and back to `opener` afterwards.
+function openDialog(id, cancelId, actions, opener) {
+  var dlg = $(id);
+  var handlers = [];
+  Object.keys(actions).forEach(function (bid) {
+    // Run the action inside the click itself: a file picker opened from it
+    // still has the user's activation, which a later 'close' task might not.
+    var h = function () { dlg.close(); actions[bid](); };
+    $(bid).addEventListener('click', h);
+    handlers.push([bid, h]);
+  });
+  var cancel = function () { dlg.close(); };
+  $(cancelId).addEventListener('click', cancel);
+  dlg.addEventListener('close', function onClose() {
+    dlg.removeEventListener('close', onClose);
+    $(cancelId).removeEventListener('click', cancel);
+    handlers.forEach(function (p) { $(p[0]).removeEventListener('click', p[1]); });
+    if (opener && opener.focus) opener.focus();
+  });
+  dlg.showModal();
+  $(cancelId).focus();
+}
+
+var dialogsWork = typeof HTMLDialogElement === 'function' &&
+  typeof $('restartDialog').showModal === 'function';
+
+function confirmRestart(restart) {
+  restart = restart || {};
+  var analyze = restart.analyze || 0;
+  var inBackup = restart.analysed_in_backup || 0;
+  var discarded = restart.discarded_completed || 0;
+  var text = 'This will analyse all ' + analyze + ' tracks from scratch' +
+    (inBackup > 0 ? ', including ' + inBackup + ' that are already analysed.' : '.');
+  var reason;
+  if (restart.status === 'fresh') {
+    reason = 'No resume file was found in the data folder, so earlier progress is not known to this run.';
+  } else if (restart.status === 'discarded_settings') {
+    reason = 'The resume file (' + discarded + ' finished tracks) would be discarded because it was written with a different Cross-check (second detector) setting.';
+  } else {
+    reason = 'The resume file' + (discarded ? ' (' + discarded + ' finished tracks)' : '') +
+      ' would be discarded because it is unreadable or from an older version.';
+  }
+  var startFresh = function () {
+    var o = options();
+    o.confirm_restart = true;
+    post('/api/run', o).then(function (r) { if (r.error) banner(errorText(r), true); });
+  };
+  if (!dialogsWork) {
+    if (window.confirm(text + '\n\n' + reason + '\n\nStart from scratch anyway?')) startFresh();
+    return;
+  }
+  $('restartText').textContent = text;
+  $('restartReason').textContent = reason;
+  openDialog('restartDialog', 'restartCancel', {
+    restartImport: function () { pickLedger($('runBtn')); },
+    restartFresh: startFresh
+  }, $('runBtn'));
+}
+
+// ---- Run ------------------------------------------------------------------
+
 $('runBtn').addEventListener('click', function () {
-  var o = options();
-  if (!o.backup) { banner('Give me the path to a backup file first.', true); return; }
   banner('');
-  post('/api/run', o).then(function (r) {
-    if (r.error) banner(r.error, true);
+  post('/api/run', options()).then(function (r) {
+    if (r.code === 'restart_needs_confirmation') { confirmRestart(r.restart); return; }
+    if (r.error) banner(errorText(r), true);
   });
 });
 
@@ -286,13 +541,151 @@ $('stopBtn').addEventListener('click', function () {
   $('stopBtn').disabled = true;
 });
 
+// ---- Import earlier progress ---------------------------------------------
+
+var importOpener = null;
+
+function pickLedger(opener) {
+  importOpener = opener || null;
+  $('ledgerFile').value = '';
+  $('ledgerFile').click();
+}
+
+$('importBtn').addEventListener('click', function () { pickLedger($('importBtn')); });
+$('resumeImportBtn').addEventListener('click', function () { pickLedger($('resumeImportBtn')); });
+
+$('ledgerFile').addEventListener('change', function () {
+  var file = $('ledgerFile').files && $('ledgerFile').files[0];
+  if (!file) return;
+  if (file.size > MAX_UPLOAD) {
+    setStatus('importStatus', file.name + ' is too large (the limit is 64 MB). Is it really a resume file?', true);
+    return;
+  }
+  importLedger(file, false);
+});
+
+function optionLabel(value) {
+  var opts = $('second').options;
+  for (var i = 0; i < opts.length; i++) if (opts[i].value === value) return opts[i].textContent;
+  return null;
+}
+
+function importLedger(file, replace) {
+  var path = '/api/ledger?second_opinion=' + encodeURIComponent($('second').value) +
+    (replace ? '&replace=1' : '');
+  setStatus('importStatus', 'Importing ' + file.name + '…');
+  upload(path, file).then(function (r) {
+    if (r.code === 'ledger_exists') {
+      setStatus('importStatus', '');
+      var text = 'The data folder already has a resume file with ' + r.existing_completed +
+        ' finished tracks. Replace it with this one (' + r.incoming_completed + ' finished)?';
+      var replaceIt = function () { importLedger(file, true); };
+      if (!dialogsWork) {
+        if (window.confirm(text)) replaceIt();
+        return;
+      }
+      $('replaceText').textContent = text;
+      openDialog('replaceDialog', 'replaceCancel', { replaceConfirm: replaceIt },
+        importOpener || $('importBtn'));
+      return;
+    }
+    if (!r.ok) {
+      setStatus('importStatus', r.error, true);
+      return;
+    }
+    var msg = 'Imported resume file: ' + r.completed + ' finished tracks.';
+    if (r.settings_match === false) {
+      msg += ' It was written with a different Cross-check setting';
+      var label = r.matching_setting ? optionLabel(r.matching_setting) : null;
+      if (label) {
+        $('second').value = r.matching_setting;
+        msg += ', so I switched "Cross-check the tempo" to "' + label + '" so the run resumes from it.';
+      } else {
+        msg += '; with the current settings a run would not resume from it.';
+      }
+    }
+    setStatus('importStatus', msg);
+    refreshFiles();
+    runPlan();
+  });
+}
+
+// ---- Saved audio ----------------------------------------------------------
+
+var audio = null;          // last GET /api/audio reply
+var audioBusy = false;     // a delete is in flight
+
+function sizeText(bytes) {
+  var mb = (bytes || 0) / (1024 * 1024);
+  return mb > 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb.toFixed(1) + ' MB';
+}
+
+function filesText(n) {
+  return n + (n === 1 ? ' file' : ' files');
+}
+
+function updateAudioButton() {
+  // Not disabled while a delete is in flight (audioBusy guards the click
+  // instead): the dialog hands focus back to this button when it closes.
+  $('audioDelete').disabled = wasRunning || !audio || !(audio.files > 0);
+}
+
+function refreshAudio() {
+  return fetch('/api/audio')
+    .then(function (r) { return r.json(); })
+    .then(function (a) {
+      if (!a || a.error) return;
+      audio = a;
+      $('audioStats').textContent = a.files > 0
+        ? 'Saved audio: ' + filesText(a.files) + ', ' + sizeText(a.bytes)
+        : 'No saved audio.';
+      if (a.path) $('audioStats').title = a.path;
+      updateAudioButton();
+    })
+    .catch(function () { /* the poller already reports a dead server */ });
+}
+
+function deleteAudio() {
+  audioBusy = true;
+  updateAudioButton();
+  setStatus('audioStatus', 'Deleting saved audio…');
+  post('/api/audio/delete', {}).then(function (r) {
+    if (r.ok) {
+      setStatus('audioStatus', 'Deleted ' + filesText(r.deleted_files || 0) +
+        ', freed ' + sizeText(r.freed_bytes) + '.');
+    } else if (r.code === 'running') {
+      setStatus('audioStatus', 'A run is going. Delete the saved audio once it has finished.', true);
+    } else if (r.code === 'unsafe_path') {
+      setStatus('audioStatus', 'Nothing was deleted: the audio folder is a link to somewhere else. ' +
+        (r.error || ''), true);
+    } else {
+      setStatus('audioStatus', r.error || 'Unexpected reply from the analyzer.', true);
+    }
+  }).then(function () {
+    audioBusy = false;
+    return refreshAudio();
+  }).then(updateAudioButton);
+}
+
+$('audioDelete').addEventListener('click', function () {
+  if (audioBusy || !audio || !(audio.files > 0)) return;
+  var text = 'Delete ' + audio.files + ' saved audio ' + (audio.files === 1 ? 'file' : 'files') +
+    ' (' + sizeText(audio.bytes) + ')? A later run will download them again.';
+  if (!dialogsWork) {
+    if (window.confirm(text)) deleteAudio();
+    return;
+  }
+  $('audioText').textContent = text;
+  openDialog('audioDialog', 'audioCancel', { audioConfirm: deleteAudio }, $('audioDelete'));
+});
+
+// ---- Oracle ---------------------------------------------------------------
+
 $('oracleBtn').addEventListener('click', function () {
-  var o = options();
-  if (!o.backup) { banner('The oracle needs a backup file to sample from.', true); return; }
+  if (!files || !files.backup) { banner(NO_BACKUP, true); return; }
   post('/api/oracle/run', {
-    backup: o.backup,
     count: parseInt($('oracleCount').value, 10) || 200
-  }).then(function (r) { if (r.error) banner(r.error, true); });
+  }).then(function (r) { if (r.error) banner(errorText(r), true); });
 });
 
 // Measured on a real collection: 7.84 s a track with one of each, 1.52 at
@@ -334,7 +727,13 @@ $('log').addEventListener('scroll', function () {
   pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
 });
 
+var wasRunning = false;
+
 function render(s) {
+  // A run that just finished may have written a result (and a resume file).
+  if (wasRunning && !s.running) { refreshFiles(); refreshAudio(); }
+  wasRunning = !!s.running;
+  updateAudioButton();
   $('activity').textContent = s.stopping ? 'Stopping after this track…' : (s.activity || 'Idle');
   $('done').textContent = s.done;
   $('total').textContent = s.total;
@@ -367,6 +766,8 @@ function poll() {
     .then(function () { setTimeout(poll, 700); });
 }
 poll();
+refreshFiles();
+refreshAudio();
 
 // The oracle section only appears if this machine actually has one. On a
 // friend's machine it simply is not there.

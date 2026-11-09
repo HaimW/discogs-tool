@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 use analyzer_cli::adapter::FileAnalyzer;
 use analyzer_cli::progress::Renderer;
-use analyzer_cli::{default_ledger_for, execute, plan_only, Options, resolve_yt_dlp};
+use analyzer_cli::{
+    default_ledger_for, dry_run, execute, resolve_yt_dlp, second_opinion_label, Options,
+};
 use analyzer_core::runtime::user_path;
 use analyzer_core::runtime::SystemClock;
 use analyzer_core::ANALYZER_VERSION;
@@ -48,6 +50,17 @@ struct Args {
     /// Show what would be analysed, then stop without downloading anything.
     #[arg(long)]
     plan: bool,
+
+    /// Start from scratch even though earlier work exists.
+    ///
+    /// Without this, a run refuses to start when it would not resume but
+    /// there is earlier progress it would redo: the backup already holds
+    /// analysed tracks, or the resume file would be discarded (usually because
+    /// --second-opinion differs from the earlier run) with finished tracks in
+    /// it. Check with --plan first; pass the earlier run's -o/--ledger/
+    /// --second-opinion to resume instead.
+    #[arg(long)]
+    fresh: bool,
 
     /// Re-analyse tracks even when their BPM/key was entered or verified by
     /// hand. This overwrites your own data — the default protects it.
@@ -178,6 +191,38 @@ fn user_path_of(path: PathBuf) -> PathBuf {
     }
 }
 
+/// The run's options, as both a real run and `--plan` see them.
+///
+/// Paths go through `user_path` so a Windows path pasted into a WSL shell
+/// resolves, the same as in the UI. Creates nothing: the dry run relies on it.
+fn options_from_args(args: &Args) -> Options {
+    // Clap guarantees this is present unless `--ui` was given, which returns
+    // before this is called.
+    let backup = user_path_of(args.backup.clone().expect("backup is required without --ui"));
+    let output = user_path_of(args.output.clone());
+    Options {
+        ledger: args
+            .ledger
+            .clone()
+            .map(user_path_of)
+            .unwrap_or_else(|| default_ledger_for(&output)),
+        work_dir: args
+            .work_dir
+            .clone()
+            .map(user_path_of)
+            .unwrap_or_else(|| std::env::temp_dir().join("discogs-analyzer")),
+        backup,
+        output,
+        force: args.force,
+        limit: args.limit,
+        max_attempts: args.max_attempts,
+        downloads_at_once: args.downloads,
+        analysers_at_once: args.analysers,
+        keep_audio: args.keep_audio,
+        second_opinion: second_opinion_label(args.second_opinion.into()).to_string(),
+    }
+}
+
 fn main() {
     if let Err(message) = run() {
         eprintln!("error: {message}");
@@ -193,15 +238,28 @@ fn run() -> Result<(), String> {
         return analyzer_cli::ui::serve(args.ui_port, !args.no_open, args.allow_origin);
     }
 
-    // Clap guarantees this is present unless `--ui` was given, which returned
-    // above. Paths go through `user_path` so a Windows path pasted into a WSL
-    // shell resolves, the same as in the UI.
-    let backup = user_path_of(args.backup.clone().expect("backup is required without --ui"));
-    let output = user_path_of(args.output.clone());
+    // Resolved before `--plan`, so the dry run looks at exactly the ledger,
+    // settings and retry budget the real run would.
+    let options = options_from_args(&args);
 
     if args.plan {
-        plan_only(&backup, args.force, &mut stdout)?;
+        dry_run(&options, &mut stdout)?;
         return Ok(());
+    }
+
+    // The restart guard, before anything is resolved or written: a refusal
+    // must leave no ledger, export or work dir behind. The same dry run the
+    // UI asks, so the two front ends cannot disagree about what redoes work.
+    if !args.fresh {
+        let report = dry_run(&options, &mut std::io::sink())?;
+        if report.restart_redoes_work() {
+            return Err(format!(
+                "{}\nNothing was started. Run with --plan to see what a run would do; to resume \
+                 instead, pass the earlier run's -o/--ledger/--second-opinion. To start from \
+                 scratch anyway, re-run with --fresh.",
+                report.restart_message()
+            ));
+        }
     }
 
     let yt_dlp = resolve_yt_dlp(args.yt_dlp.clone().map(user_path_of))?;
@@ -218,23 +276,6 @@ fn run() -> Result<(), String> {
     let clock = SystemClock;
     let analyzer =
         FileAnalyzer::new(&clock, ANALYZER_VERSION).with_second_opinion(args.second_opinion.into());
-
-    let options = Options {
-        ledger: args.ledger.map(user_path_of).unwrap_or_else(|| default_ledger_for(&output)),
-        work_dir: args
-            .work_dir
-            .map(user_path_of)
-            .unwrap_or_else(|| std::env::temp_dir().join("discogs-analyzer")),
-        backup,
-        output: output.clone(),
-        force: args.force,
-        limit: args.limit,
-        max_attempts: args.max_attempts,
-        downloads_at_once: args.downloads,
-        analysers_at_once: args.analysers,
-        keep_audio: args.keep_audio,
-        second_opinion: format!("{:?}", args.second_opinion),
-    };
 
     // Ctrl-C sets a flag instead of killing the process, so the current track
     // finishes and the ledger is saved. A second Ctrl-C still hard-kills, which
@@ -299,3 +340,34 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use analyzer_cli::settings_hash_for;
+
+    #[test]
+    fn the_cli_default_hashes_like_the_ui_default() {
+        // a91b4430e1237ed4 is the hash in a real ledger the UI wrote with its
+        // default "Always". The CLI default must resume that ledger.
+        let args = Args::parse_from(["discogs-analyzer", "backup.json"]);
+        let options = options_from_args(&args);
+        assert_eq!(options.second_opinion, "Always");
+        assert_eq!(settings_hash_for(&options.second_opinion), "a91b4430e1237ed4");
+    }
+
+    #[test]
+    fn every_cli_choice_uses_the_shared_label() {
+        for (flag, label) in [("always", "Always"), ("unsure", "Unsure"), ("never", "Never")] {
+            let args =
+                Args::parse_from(["discogs-analyzer", "backup.json", "--second-opinion", flag]);
+            assert_eq!(options_from_args(&args).second_opinion, label);
+        }
+    }
+
+    #[test]
+    fn plan_resolves_the_same_ledger_as_a_run() {
+        let args = Args::parse_from(["discogs-analyzer", "b.json", "--plan", "-o", "out/x.json"]);
+        let options = options_from_args(&args);
+        assert_eq!(options.ledger, PathBuf::from("out/x.ledger.json"));
+    }
+}

@@ -525,3 +525,42 @@ test('m5 restore is refused while a sync is running', async () => {
     assert.equal(toasts[0][1], 'error');
     assert.match(toasts[0][0], /sync is running/i);
 });
+
+// ---------- shared with the Analyzer tab ----------
+
+test('buildFullBackup resolves to the same payload exportFullBackup downloads', async () => {
+    const { ctx } = makeApp();
+    await ctx.dbPut('config', { key: 'discogs_token', value: 'SECRET' });
+    await ctx.dbPut('videos', { release_id: 1, youtube_id: 'yt1' });
+    const payload = plain(await ctx.buildFullBackup());
+    assert.equal(payload._version, 3);
+    assert.equal(payload.collection.videos.length, 1);
+    assert.ok(!JSON.stringify(payload).includes('SECRET'), 'token never exported');
+
+    let text = null;
+    ctx.downloadBlob = (_n, _t, t) => { text = t; };
+    await ctx.exportFullBackup();
+    const downloaded = JSON.parse(text);
+    delete downloaded.exported_at;
+    delete payload.exported_at;
+    assert.deepEqual(downloaded, payload);
+});
+
+test('restoreParsedBackup: same rules and toast as Restore from backup; null when refused', async () => {
+    const { ctx, store, toasts } = makeApp();
+    const res = await ctx.restoreParsedBackup({
+        _app: 'VinylCollectionPlayer', _version: 2,
+        track_meta: [{ id: '1_yt', bpm: 128, bpm_source: 'analysis' }, { id: '2_yt', bpm: 90, bpm_source: 'analysis' }],
+    });
+    assert.equal(res.counts.track_meta, 2);
+    assert.equal(store('track_meta').get('1_yt').bpm_source, 'analysis');
+    assert.deepEqual(toasts.pop(), ['Restored (v2): 2 track metadata records', 'success']);
+
+    assert.equal(await ctx.restoreParsedBackup({ hello: 1 }), null);
+    assert.match(toasts.pop()[0], /does not look like a Vinyl Collection Player backup/);
+
+    ctx._syncRunning = true;
+    assert.equal(await ctx.restoreParsedBackup({ _app: 'VinylCollectionPlayer', track_meta: [{ id: 'x' }] }), null);
+    assert.match(toasts.pop()[0], /sync is running/i);
+    assert.equal(store('track_meta').has('x'), false);
+});

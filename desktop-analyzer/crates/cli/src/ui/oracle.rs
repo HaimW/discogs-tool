@@ -65,9 +65,11 @@ pub fn start(state: &Arc<UiState>, body: &serde_json::Value) -> serde_json::Valu
     let Some(dir) = find() else {
         return serde_json::json!({ "error": "no oracle on this machine" });
     };
-    let backup = PathBuf::from(body["backup"].as_str().unwrap_or(""));
+    // Always the uploaded backup: a posted path is ignored, so the page cannot
+    // point the benchmark at an arbitrary file.
+    let backup = state.backup_path();
     if !backup.is_file() {
-        return serde_json::json!({ "error": "pick a backup file first" });
+        return serde_json::json!({ "error": "Choose a backup file first.", "code": "no_backup" });
     }
     let count = body["count"].as_u64().unwrap_or(200).clamp(1, 2000);
 

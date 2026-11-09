@@ -2,6 +2,7 @@
 //! drive it with stub download and analysis steps instead of hitting YouTube.
 
 pub mod adapter;
+pub mod datadir;
 pub mod progress;
 pub mod ui;
 
@@ -9,10 +10,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use analyzer_core::backup::{Backup, MetaExport};
-use analyzer_core::ledger::{settings_hash, Ledger, ResumeOutcome};
+use analyzer_core::ledger::{settings_hash, EntryState, Ledger, ResumeOutcome};
+use analyzer_core::meta::SOURCE_ANALYSIS;
 use analyzer_core::pipeline::{self, Analyzer, Clock, Downloader, Progress, RunOptions, Summary};
 use analyzer_core::plan::{Decision, Plan, ReviewReason, SkipReason};
 use analyzer_core::runtime::{self, FileLedgerStore};
+use analyzer_core::tempo::SecondOpinion;
 use analyzer_core::{merged_records, ANALYZER_VERSION};
 
 /// Identifies the analysis algorithm, independently of the package version.
@@ -44,7 +47,7 @@ pub struct Options {
     pub keep_audio: bool,
     /// Recorded in the settings hash: changing when a second detector runs
     /// changes the numbers, so a ledger written under a different policy is
-    /// not resumed.
+    /// not resumed. Always a [`second_opinion_label`].
     pub second_opinion: String,
 }
 
@@ -98,23 +101,334 @@ fn yt_dlp_name() -> &'static str {
     }
 }
 
-/// Print what a run would do, without downloading anything.
+/// The settings hash a run records in its ledger.
+///
+/// The one place it is computed: a dry run that hashed differently from the
+/// run it predicts would report a discarded ledger the run would resume, or
+/// the other way round. `second_opinion` is the label from
+/// [`second_opinion_label`].
+pub fn settings_hash_for(second_opinion: &str) -> String {
+    settings_hash(&[
+        ANALYZER_VERSION,
+        ALGORITHM_TAG,
+        &format!("second-opinion:{second_opinion}"),
+    ])
+}
+
+/// The label a second-opinion policy is recorded under in the settings hash.
+///
+/// Both front ends go through this, so the CLI's `--second-opinion always`
+/// and the UI's "Always" select cannot drift into hashing "always" against
+/// "Always" and discarding each other's ledgers. The labels are what earlier
+/// ledgers were written with; changing one discards those ledgers.
+pub fn second_opinion_label(policy: SecondOpinion) -> &'static str {
+    match policy {
+        SecondOpinion::Always => "Always",
+        SecondOpinion::Unsure => "Unsure",
+        SecondOpinion::Never => "Never",
+    }
+}
+
+/// The ledger a run would start from, and what became of the one on disk.
+struct LoadedLedger {
+    ledger: Ledger,
+    resume: ResumeOutcome,
+    /// Tracks finished in a ledger that is being discarded: the work a run
+    /// would throw away. 0 when it resumes, when there was none, and when the
+    /// discarded file cannot be parsed at all.
+    discarded_completed: usize,
+}
+
+/// Load the ledger a run with these options would resume, without touching
+/// the disk beyond reading it.
+///
+/// The one place both `execute` and `dry_run` decide resume-or-discard, so the
+/// restart guard built on the dry run judges exactly what the run will do.
+fn load_ledger(options: &Options, now: &str) -> LoadedLedger {
+    let store = FileLedgerStore::new(&options.ledger);
+    let raw = store.load();
+    let (ledger, resume) = Ledger::resume_or_new(
+        raw.as_deref(),
+        &settings_hash_for(&options.second_opinion),
+        now,
+    );
+    let discarded_completed = match resume {
+        ResumeOutcome::Resumed { .. } | ResumeOutcome::FreshStart => 0,
+        ResumeOutcome::DiscardedSettingsChanged
+        | ResumeOutcome::DiscardedUnreadable
+        | ResumeOutcome::DiscardedOldVersion { .. } => raw
+            .as_deref()
+            .and_then(|r| Ledger::parse(r).ok())
+            .map_or(0, |l| l.completed_count()),
+    };
+    LoadedLedger { ledger, resume, discarded_completed }
+}
+
+/// Which front end a message is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Frontend {
+    Cli,
+    Ui,
+}
+
+/// What a dry run found: the work a real run with the same options would do.
+#[derive(Debug, Clone)]
+pub struct DryRun {
+    pub plan: Plan,
+    /// Analyse items the ledger has not finished: the run's real work.
+    pub outstanding: usize,
+    /// `outstanding`, cut to `--limit` when one is set.
+    pub will_run: usize,
+    /// Analyse items already done in the ledger. Counted over this plan's
+    /// Analyse items only, so `outstanding + done + exhausted` is the plan's
+    /// Analyse count; see [`DryRun::completed`] for the ledger-wide figure.
+    pub done: usize,
+    /// Analyse items that failed `max_attempts` times and will be skipped.
+    pub exhausted: usize,
+    /// The user's own data: left alone.
+    pub skip: usize,
+    /// Held back as a likely mix or a title mismatch.
+    pub review: usize,
+    pub resume: ResumeOutcome,
+    pub ledger_path: PathBuf,
+    /// Backup records whose BPM or key came from an earlier analysis run.
+    /// When there is no ledger to resume, a non-zero count suggests the
+    /// earlier run's ledger is under a different name.
+    pub analysed_in_backup: usize,
+    /// Finished tracks in a resume file the run would discard. 0 unless
+    /// `resume` is one of the `Discarded*` outcomes and the file parsed.
+    pub discarded_completed: usize,
+}
+
+impl DryRun {
+    /// True when a run would not resume: the user may be about to redo work.
+    pub fn resume_warning(&self) -> bool {
+        !matches!(self.resume, ResumeOutcome::Resumed { .. })
+    }
+
+    /// True when a run would redo finished work: it would not resume, it has
+    /// something to analyse, and there is evidence of earlier progress —
+    /// analysed tracks in the backup, or finished tracks in the resume file it
+    /// would throw away.
+    ///
+    /// Both front ends refuse such a run unless told to go ahead (the CLI's
+    /// `--fresh`, the UI's confirmation). A first-ever run has neither kind of
+    /// evidence and is never refused; nor is a run with nothing outstanding,
+    /// which redoes nothing.
+    pub fn restart_redoes_work(&self) -> bool {
+        self.resume_warning()
+            && self.outstanding > 0
+            && (self.analysed_in_backup > 0 || self.discarded_completed > 0)
+    }
+
+    /// Why a run would redo work, with the counts, for a refusal or a
+    /// confirmation dialog. Says so plainly when it would not.
+    pub fn restart_message(&self) -> String {
+        if !self.restart_redoes_work() {
+            return "A run would not redo any finished work.".to_string();
+        }
+        let shown = self.ledger_display_path();
+        let path = shown.display();
+        let n = self.outstanding;
+        let mut msg = match self.resume {
+            ResumeOutcome::FreshStart => format!(
+                "No resume file at {path}, but the backup already holds {} analysed track(s). \
+                 A run would start from scratch and analyse {n} track(s) again.",
+                self.analysed_in_backup
+            ),
+            ResumeOutcome::DiscardedSettingsChanged => format!(
+                "The resume file at {path} holds {} finished track(s) but was written with a \
+                 different second-detector (cross-check / --second-opinion) setting, so a run \
+                 would discard it and analyse {n} track(s) from scratch.",
+                self.discarded_completed
+            ),
+            ResumeOutcome::DiscardedOldVersion { found } => format!(
+                "The resume file at {path} holds {} finished track(s) but is from an older \
+                 format (v{found}), so a run would discard it and analyse {n} track(s) from \
+                 scratch.",
+                self.discarded_completed
+            ),
+            // Unparseable means nothing countable was discarded, so only the
+            // backup's analysed tracks can have brought us here.
+            ResumeOutcome::DiscardedUnreadable => format!(
+                "The resume file at {path} is unreadable and would be discarded, and the backup \
+                 already holds {} analysed track(s). A run would analyse {n} track(s) from \
+                 scratch.",
+                self.analysed_in_backup
+            ),
+            // Excluded by the guard above; kept total rather than panicking.
+            ResumeOutcome::Resumed { .. } => return self.resume_message(),
+        };
+        if self.discarded_completed > 0 && self.analysed_in_backup > 0 {
+            msg.push_str(&format!(
+                " The backup also holds {} analysed track(s).",
+                self.analysed_in_backup
+            ));
+        }
+        msg
+    }
+
+    /// Machine-readable resume status, for the UI.
+    pub fn resume_status(&self) -> &'static str {
+        match self.resume {
+            ResumeOutcome::Resumed { .. } => "resumed",
+            ResumeOutcome::FreshStart => "fresh",
+            ResumeOutcome::DiscardedSettingsChanged => "discarded_settings",
+            ResumeOutcome::DiscardedUnreadable => "discarded_unreadable",
+            ResumeOutcome::DiscardedOldVersion { .. } => "discarded_old_version",
+        }
+    }
+
+    /// Tracks marked done anywhere in a resumed ledger, including ones the
+    /// current plan no longer analyses — which is why it can exceed `done`.
+    pub fn completed(&self) -> usize {
+        match self.resume {
+            ResumeOutcome::Resumed { completed } => completed,
+            _ => 0,
+        }
+    }
+
+    /// The resume file's path for display: absolute, because a relative one
+    /// is relative to wherever the process was started — for the UI, the
+    /// server's directory, which the person reading it cannot see. Display
+    /// only: the run itself keeps using the path as given.
+    pub fn ledger_display_path(&self) -> PathBuf {
+        std::path::absolute(&self.ledger_path).unwrap_or_else(|_| self.ledger_path.clone())
+    }
+
+    /// One sentence on what a run would do with the resume file, in the CLI's
+    /// terms. See [`DryRun::resume_message_for`].
+    pub fn resume_message(&self) -> String {
+        self.resume_message_for(Frontend::Cli)
+    }
+
+    /// One sentence on what a run would do with the resume file, for the
+    /// given front end. Only the advice on finding earlier progress differs:
+    /// the CLI picks its resume file by output name, while the UI's paths are
+    /// fixed and earlier progress comes in through "Import earlier progress".
+    pub fn resume_message_for(&self, frontend: Frontend) -> String {
+        let shown = self.ledger_display_path();
+        let path = shown.display();
+        match self.resume {
+            ResumeOutcome::Resumed { completed } => {
+                format!("Resuming from {path} ({completed} track(s) done in it).")
+            }
+            ResumeOutcome::FreshStart => {
+                let mut msg =
+                    format!("No resume file found at {path} — a run starts from scratch.");
+                if self.analysed_in_backup > 0 {
+                    let advice = match frontend {
+                        Frontend::Cli => {
+                            "use the same output name (or resume file) as the run that \
+                             produced them."
+                        }
+                        Frontend::Ui => {
+                            "use \"Import earlier progress\" with that run's .ledger.json \
+                             file."
+                        }
+                    };
+                    msg.push_str(&format!(
+                        " The backup already holds {} analysed track(s), so earlier progress \
+                         may be in a different resume file: {advice}",
+                        self.analysed_in_backup
+                    ));
+                }
+                msg
+            }
+            ResumeOutcome::DiscardedSettingsChanged => format!(
+                "Warning: the resume file at {path} was written with different analysis \
+                 settings and would be discarded — a run starts from scratch. The usual \
+                 cause is a different second-detector (cross-check / --second-opinion) \
+                 setting from the earlier run."
+            ),
+            ResumeOutcome::DiscardedUnreadable => format!(
+                "Warning: the resume file at {path} is unreadable and would be discarded — \
+                 a run starts from scratch."
+            ),
+            ResumeOutcome::DiscardedOldVersion { found } => format!(
+                "Warning: the resume file at {path} is from an older format (v{found}) and \
+                 would be discarded — a run starts from scratch."
+            ),
+        }
+    }
+}
+
+/// Print what a run with these options would do, without downloading
+/// anything.
 ///
 /// Worth having before committing to something that can take hours: it is the
 /// only cheap way to notice that a tracklist has not been synced and half the
-/// collection is about to be flagged as a title mismatch.
-pub fn plan_only(backup_path: &Path, force: bool, out: &mut dyn Write) -> Result<Plan, String> {
-    let backup = read_backup(backup_path)?;
-    let plan = Plan::build(&backup, force);
+/// collection is about to be flagged as a title mismatch — or that the resume
+/// file is not the one the last run wrote, and hours of work are about to be
+/// redone.
+///
+/// Read-only: it reads the backup and the ledger, and writes nothing.
+pub fn dry_run(options: &Options, out: &mut dyn Write) -> Result<DryRun, String> {
+    let backup = read_backup(&options.backup)?;
+    let plan = Plan::build(&backup, options.force);
     let counts = plan.counts();
+    // The timestamp only stamps a fresh ledger, which is safe only because the
+    // dry run never saves it.
+    let LoadedLedger { ledger, resume, discarded_completed } = load_ledger(options, "");
 
-    writeln!(out, "{} video(s) in {}", plan.items.len(), backup_path.display()).ok();
-    writeln!(out, "  analyse       {}", counts.analyze).ok();
-    writeln!(out, "  skip          {}", counts.skip).ok();
-    writeln!(out, "  needs review  {}", counts.review).ok();
+    let outstanding = ledger.outstanding(&plan, options.max_attempts).len();
+    let mut done = 0usize;
+    let mut exhausted = 0usize;
+    for item in plan.items.iter().filter(|i| i.decision == Decision::Analyze) {
+        match ledger.entries.get(&item.id) {
+            Some(e) if e.state == EntryState::Done => done += 1,
+            Some(e) if e.state == EntryState::Failed && e.attempts >= options.max_attempts => {
+                exhausted += 1
+            }
+            _ => {}
+        }
+    }
+    let will_run = options.limit.map_or(outstanding, |l| l.min(outstanding));
+    let analysed_in_backup = backup
+        .track_meta
+        .iter()
+        .filter(|m| {
+            m.bpm_source.as_deref() == Some(SOURCE_ANALYSIS)
+                || m.key_source.as_deref() == Some(SOURCE_ANALYSIS)
+        })
+        .count();
+
+    let report = DryRun {
+        plan,
+        outstanding,
+        will_run,
+        done,
+        exhausted,
+        skip: counts.skip,
+        review: counts.review,
+        resume,
+        ledger_path: options.ledger.clone(),
+        analysed_in_backup,
+        discarded_completed,
+    };
+
+    writeln!(out, "{} video(s) in {}", report.plan.items.len(), options.backup.display()).ok();
+    writeln!(out, "{}", report.resume_message()).ok();
+    writeln!(out, "  to analyse        {}", report.outstanding).ok();
+    if report.will_run < report.outstanding {
+        writeln!(out, "    this run stops after {} (--limit)", report.will_run).ok();
+    }
+    writeln!(out, "  already analysed  {}", report.done).ok();
+    if report.exhausted > 0 {
+        writeln!(
+            out,
+            "  failed too often  {}  (skipped; raise --max-attempts above {} to retry them)",
+            report.exhausted, options.max_attempts
+        )
+        .ok();
+    } else {
+        writeln!(out, "  failed too often  0").ok();
+    }
+    writeln!(out, "  already yours     {}", report.skip).ok();
+    writeln!(out, "  needs review      {}", report.review).ok();
 
     let mut shown = 0usize;
-    for item in &plan.items {
+    for item in &report.plan.items {
         let note = match &item.decision {
             Decision::Analyze => continue,
             Decision::Skip(SkipReason::ManualData) => "your own bpm/key already there".to_string(),
@@ -138,7 +452,7 @@ pub fn plan_only(backup_path: &Path, force: bool, out: &mut dyn Write) -> Result
     if shown > 20 {
         writeln!(out, "  … and {} more", shown - 20).ok();
     }
-    Ok(plan)
+    Ok(report)
 }
 
 /// Run the pipeline and write the export.
@@ -163,13 +477,8 @@ pub fn execute(
         .map_err(|e| format!("could not create work dir {}: {e}", options.work_dir.display()))?;
 
     let store = FileLedgerStore::new(&options.ledger);
-    let hash = settings_hash(&[
-        ANALYZER_VERSION,
-        ALGORITHM_TAG,
-        &format!("second-opinion:{}", options.second_opinion),
-    ]);
     let now = clock.now_iso8601();
-    let (mut ledger, resumed) = Ledger::resume_or_new(store.load().as_deref(), &hash, &now);
+    let LoadedLedger { mut ledger, resume: resumed, .. } = load_ledger(options, &now);
     report_resume(&resumed, &options.ledger, out);
 
     let run_options = RunOptions {

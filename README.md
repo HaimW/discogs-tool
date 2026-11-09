@@ -515,6 +515,7 @@ A `_contents` entry at the top of the file lists every section and its label. Tr
 What restore accepts and how it merges:
 
 - Backups from any version of this page (v1, v2, v3), and the desktop analyzer's `analysis.json` (restores track metadata only).
+- The **Analyzer** tab's **Load results into the app** (when the app is served over `http` and the analyzer was started with `--allow-origin`) fetches the analyzer's result and restores it through this same code, after asking. Its **Send my collection** sends the same file **Download full backup** saves.
 - Releases are merged field by field: your video picks in this browser win over the file's, fetched details are kept when the file lacks them, and newer have/want counts are kept. Other records from the file replace the local record with the same ID.
 - Marketplace stats already in this browser are kept; the file's fill in only what is missing, and do not trigger alerts by themselves.
 - Max-price alerts for releases that are in neither your want list nor the file are dropped.
